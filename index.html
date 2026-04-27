@@ -8,6 +8,7 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
     html,body{height:100%;}
@@ -20,6 +21,7 @@
     @keyframes fadeIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
     @keyframes slideUp{from{opacity:0;transform:translateY(30px) scale(.97);}to{opacity:1;transform:translateY(0) scale(1);}}
     @keyframes shimmer{0%,100%{opacity:.7;}50%{opacity:1;}}
+    @keyframes spin{to{transform:rotate(360deg);}}
     .wizard-card{animation:slideUp .35s ease both;}
     .empty-state{animation:fadeIn .4s ease both;}
   </style>
@@ -28,6 +30,11 @@
 <div id="root"></div>
 <script type="text/babel">
 const {useState,useRef,useEffect,useCallback}=React;
+
+/* ── Supabase ─────────────────────────────────────────────────────────────── */
+const SUPA_URL='https://bjjndbiwzwfqxoheaavv.supabase.co';
+const SUPA_KEY='sb_publishable_YR8W2NIYaPz6VFzonn6QMQ_TrgBq7ad';
+const supabase=window.supabase.createClient(SUPA_URL,SUPA_KEY);
 
 /* ── Constants ──────────────────────────────────────────────────────────── */
 const SEAT_R=20,ORBIT_R=80,TABLE_R=44,SVG_PAD=14;
@@ -68,7 +75,7 @@ function circleSeats(cap,sc){
 }
 function svgLabel(name){const m=name.match(/^Table\s+(.+)$/i);if(m)return'T'+m[1];return name.length>7?name.substring(0,6)+'…':name;}
 
-/* ── Canvas rounded rect helper ─────────────────────────────────────────── */
+/* ── Canvas rounded rect ─────────────────────────────────────────────────── */
 function cRoundRect(ctx,x,y,w,h,r){
   ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();
 }
@@ -93,6 +100,206 @@ function parseGuestText(text){
     name=name.replace(/['"]/g,'').trim();
     return name?{id:guid(),name,count:Math.min(count,20)}:null;
   }).filter(Boolean);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LOGIN SCREEN
+══════════════════════════════════════════════════════════════════════════ */
+function LoginScreen(){
+  const[mode,setMode]=useState('login'); // 'login' | 'signup'
+  const[email,setEmail]=useState('');
+  const[password,setPassword]=useState('');
+  const[loading,setLoading]=useState(false);
+  const[error,setError]=useState('');
+  const[message,setMessage]=useState('');
+
+  const handleGoogle=async()=>{
+    setLoading(true);setError('');
+    const{error}=await supabase.auth.signInWithOAuth({
+      provider:'google',
+      options:{redirectTo:window.location.origin}
+    });
+    if(error)setError(error.message);
+    setLoading(false);
+  };
+
+  const handleEmail=async e=>{
+    e.preventDefault();setLoading(true);setError('');setMessage('');
+    if(mode==='login'){
+      const{error}=await supabase.auth.signInWithPassword({email,password});
+      if(error)setError(error.message);
+    } else {
+      const{error}=await supabase.auth.signUp({email,password});
+      if(error)setError(error.message);
+      else setMessage('Check your email to confirm your account!');
+    }
+    setLoading(false);
+  };
+
+  return(
+    <div style={{minHeight:'100vh',background:'radial-gradient(ellipse at 50% 40%, #edf4ea 0%, #f4efe6 65%)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:24}}>
+      <div style={{position:'absolute',width:500,height:500,borderRadius:'50%',border:'1px solid rgba(122,140,114,.12)',pointerEvents:'none'}}/>
+      <div style={{position:'absolute',width:380,height:380,borderRadius:'50%',border:'1px solid rgba(122,140,114,.1)',pointerEvents:'none'}}/>
+
+      <div className="wizard-card" style={{background:P.cream,borderRadius:20,padding:'40px 40px 36px',width:400,boxShadow:'0 24px 60px rgba(0,0,0,.12)',border:`1px solid ${P.border}`,textAlign:'center',zIndex:1}}>
+
+        {/* Logo */}
+        <svg width="60" height="46" viewBox="0 0 80 60" style={{marginBottom:14}}>
+          <circle cx="40" cy="30" r="10" fill="none" stroke="#7a8c72" strokeWidth="1.5"/>
+          {[0,60,120,180,240,300].map(a=>{const r=a*Math.PI/180,x1=40+12*Math.cos(r),y1=30+12*Math.sin(r),x2=40+24*Math.cos(r),y2=30+24*Math.sin(r);return<g key={a}><line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#7a8c72" strokeWidth="1"/><circle cx={x2} cy={y2} r="3.5" fill="#a8bc9e"/></g>;})}
+          <circle cx="40" cy="30" r="5" fill="#7a8c72"/>
+        </svg>
+        <div style={{fontSize:28,letterSpacing:'.2em',textTransform:'uppercase',color:P.brown,marginBottom:4}}>EasySeat</div>
+        <div style={{width:50,height:1.5,background:P.gold,margin:'0 auto 28px'}}/>
+
+        {/* Google button */}
+        <button onClick={handleGoogle} disabled={loading} style={{
+          width:'100%',padding:'12px',borderRadius:10,border:`1.5px solid ${P.border}`,
+          background:P.cream,cursor:'pointer',fontSize:13,color:P.brown,
+          display:'flex',alignItems:'center',justifyContent:'center',gap:10,
+          marginBottom:16,fontFamily:'Georgia,serif',transition:'background .15s',
+          opacity:loading?.6:1,
+        }}
+        onMouseEnter={e=>e.currentTarget.style.background=P.parchment}
+        onMouseLeave={e=>e.currentTarget.style.background=P.cream}>
+          <svg width="18" height="18" viewBox="0 0 18 18">
+            <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
+            <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
+            <path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>
+            <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
+          </svg>
+          Continue with Google
+        </button>
+
+        {/* Divider */}
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
+          <div style={{flex:1,height:1,background:P.border}}/>
+          <span style={{fontSize:11,color:P.brownLight,letterSpacing:'.08em'}}>OR</span>
+          <div style={{flex:1,height:1,background:P.border}}/>
+        </div>
+
+        {/* Email/password form */}
+        <form onSubmit={handleEmail}>
+          <input type="email" placeholder="Email address" value={email} onChange={e=>setEmail(e.target.value)} required
+            style={{width:'100%',padding:'10px 12px',borderRadius:8,border:`1.5px solid ${P.border}`,fontSize:13,background:P.cream,color:P.brown,outline:'none',marginBottom:10,fontFamily:'Georgia,serif'}}/>
+          <input type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} required
+            style={{width:'100%',padding:'10px 12px',borderRadius:8,border:`1.5px solid ${P.border}`,fontSize:13,background:P.cream,color:P.brown,outline:'none',marginBottom:16,fontFamily:'Georgia,serif'}}/>
+
+          {error&&<div style={{fontSize:12,color:'#e53e3e',marginBottom:12,textAlign:'left'}}>{error}</div>}
+          {message&&<div style={{fontSize:12,color:'#4a5e45',marginBottom:12,textAlign:'left'}}>{message}</div>}
+
+          <button type="submit" disabled={loading} style={{
+            width:'100%',padding:'12px',borderRadius:10,border:'none',
+            background:'#3d4a38',color:'#f4efe6',cursor:'pointer',fontSize:12,
+            letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'Georgia,serif',
+            fontWeight:700,opacity:loading?.6:1,
+          }}>
+            {loading?'…':mode==='login'?'Sign In':'Create Account'}
+          </button>
+        </form>
+
+        <button onClick={()=>{setMode(m=>m==='login'?'signup':'login');setError('');setMessage('');}}
+          style={{marginTop:16,background:'none',border:'none',cursor:'pointer',color:P.brownMid,fontSize:12,fontFamily:'Georgia,serif'}}>
+          {mode==='login'?'No account? Sign up →':'Have an account? Sign in →'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DASHBOARD
+══════════════════════════════════════════════════════════════════════════ */
+function Dashboard({session,onOpenChart,onNewChart}){
+  const[charts,setCharts]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[deleting,setDeleting]=useState(null);
+
+  useEffect(()=>{
+    loadCharts();
+  },[]);
+
+  const loadCharts=async()=>{
+    setLoading(true);
+    const{data,error}=await supabase.from('charts').select('id,name,created_at,updated_at').order('updated_at',{ascending:false});
+    if(!error)setCharts(data||[]);
+    setLoading(false);
+  };
+
+  const deleteChart=async(id,e)=>{
+    e.stopPropagation();
+    if(!confirm('Delete this chart? This cannot be undone.'))return;
+    setDeleting(id);
+    await supabase.from('charts').delete().eq('id',id);
+    setCharts(p=>p.filter(c=>c.id!==id));
+    setDeleting(null);
+  };
+
+  const signOut=async()=>await supabase.auth.signOut();
+
+  const fmt=d=>new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+
+  return(
+    <div style={{minHeight:'100vh',background:'radial-gradient(ellipse at 50% 30%, #edf4ea 0%, #f4efe6 70%)'}}>
+      {/* Header */}
+      <header style={{background:'linear-gradient(135deg,#3d4a38 0%,#4e5e48 100%)',padding:'16px 32px',display:'flex',alignItems:'center',justifyContent:'space-between',boxShadow:'0 4px 20px rgba(0,0,0,.2)'}}>
+        <div style={{fontSize:20,color:'#f4efe6',letterSpacing:'.22em',textTransform:'uppercase',fontWeight:700}}>EasySeat</div>
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <span style={{fontSize:12,color:'#a8bc9e',letterSpacing:'.08em'}}>{session.user.email}</span>
+          <button onClick={signOut} style={{padding:'7px 16px',borderRadius:6,border:'1px solid rgba(255,255,255,.2)',background:'transparent',color:'#f4efe6',cursor:'pointer',fontSize:11,letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'Georgia,serif'}}>Sign Out</button>
+        </div>
+      </header>
+
+      <div style={{maxWidth:900,margin:'0 auto',padding:'48px 24px'}}>
+        {/* Title + new button */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:36}}>
+          <div>
+            <div style={{fontSize:26,letterSpacing:'.1em',textTransform:'uppercase',color:P.brown}}>My Charts</div>
+            <div style={{fontSize:13,color:P.brownLight,marginTop:4,fontStyle:'italic'}}>Your saved seating charts</div>
+          </div>
+          <button onClick={onNewChart} style={{
+            padding:'12px 28px',borderRadius:10,border:'none',background:'#3d4a38',
+            color:'#f4efe6',cursor:'pointer',fontSize:12,letterSpacing:'.12em',
+            textTransform:'uppercase',fontFamily:'Georgia,serif',fontWeight:700,
+            boxShadow:'0 4px 16px rgba(61,74,56,.3)',
+          }}>+ New Chart</button>
+        </div>
+
+        {loading&&(
+          <div style={{textAlign:'center',padding:60,color:P.brownLight,fontSize:14,fontStyle:'italic'}}>Loading your charts…</div>
+        )}
+
+        {!loading&&charts.length===0&&(
+          <div className="empty-state" style={{textAlign:'center',padding:80,background:P.cream,borderRadius:16,border:`1px solid ${P.border}`}}>
+            <div style={{fontSize:48,marginBottom:16}}>🪑</div>
+            <div style={{fontSize:18,color:P.brown,marginBottom:8}}>No charts yet</div>
+            <div style={{fontSize:13,color:P.brownLight,marginBottom:28,fontStyle:'italic'}}>Create your first seating chart to get started</div>
+            <button onClick={onNewChart} style={{padding:'13px 36px',borderRadius:10,border:'none',background:'#3d4a38',color:'#f4efe6',cursor:'pointer',fontSize:12,letterSpacing:'.15em',textTransform:'uppercase',fontFamily:'Georgia,serif',fontWeight:700,boxShadow:'0 4px 16px rgba(61,74,56,.3)'}}>+ New Chart</button>
+          </div>
+        )}
+
+        {!loading&&charts.length>0&&(
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))',gap:20}}>
+            {charts.map(chart=>(
+              <div key={chart.id} onClick={()=>onOpenChart(chart.id,chart.name)}
+                style={{background:P.cream,borderRadius:14,border:`1px solid ${P.border}`,padding:'24px 22px',cursor:'pointer',transition:'all .15s',boxShadow:'0 2px 12px rgba(61,74,56,.07)',position:'relative'}}
+                onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='0 8px 24px rgba(61,74,56,.14)';}}
+                onMouseLeave={e=>{e.currentTarget.style.transform='';e.currentTarget.style.boxShadow='0 2px 12px rgba(61,74,56,.07)';}}>
+                <div style={{fontSize:40,marginBottom:14}}>🪑</div>
+                <div style={{fontSize:15,fontWeight:700,color:P.brown,marginBottom:6,letterSpacing:'.04em'}}>{chart.name}</div>
+                <div style={{fontSize:11,color:P.brownLight}}>Updated {fmt(chart.updated_at)}</div>
+                <div style={{fontSize:11,color:P.brownLight}}>Created {fmt(chart.created_at)}</div>
+                <button onClick={e=>deleteChart(chart.id,e)} disabled={deleting===chart.id}
+                  style={{position:'absolute',top:12,right:12,background:'none',border:'none',cursor:'pointer',color:'#c4857a',fontSize:16,opacity:.6}}
+                  onMouseEnter={e=>e.currentTarget.style.opacity=1}
+                  onMouseLeave={e=>e.currentTarget.style.opacity=.6}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -288,66 +495,34 @@ function TableCard({table,overSeat,drag,isDropTarget,onSeatMouseDown,onUnassign,
   );
 }
 
-/* ── Background image with hover-X ──────────────────────────────────────── */
+/* ── BgImage ─────────────────────────────────────────────────────────────── */
 function BgImage({dataUrl,w,h,x,y,onClear,onResize,onMove,zoom}){
   const[hovered,setHovered]=useState(false);
   const[resizing,setResizing]=useState(false);
   const[moving,setMoving]=useState(false);
-
   const startImgMove=e=>{
-    e.preventDefault();e.stopPropagation();
-    setMoving(true);
-    const startX=e.clientX,startY=e.clientY,origX=x,origY=y;
-    const onMv=mv=>{
-      const z=zoom||1;
-      onMove(origX+(mv.clientX-startX)/z, origY+(mv.clientY-startY)/z);
-    };
+    e.preventDefault();e.stopPropagation();setMoving(true);
+    const sx=e.clientX,sy=e.clientY,ox=x,oy=y;
+    const onMv=mv=>{const z=zoom||1;onMove(ox+(mv.clientX-sx)/z,oy+(mv.clientY-sy)/z);};
     const onUp=()=>{setMoving(false);document.removeEventListener('mousemove',onMv);document.removeEventListener('mouseup',onUp);};
-    document.addEventListener('mousemove',onMv);
-    document.addEventListener('mouseup',onUp);
+    document.addEventListener('mousemove',onMv);document.addEventListener('mouseup',onUp);
   };
-
   const startImgResize=e=>{
-    e.preventDefault();e.stopPropagation();
-    setResizing(true);
-    const startX=e.clientX,startW=w,startH=h,aspect=w/h;
-    const onMove=mv=>{
-      const dx=(mv.clientX-startX)/(zoom||1);
-      const nw=Math.max(100,startW+dx);
-      onResize(nw,nw/aspect);
-    };
-    const onUp=()=>{setResizing(false);document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);};
-    document.addEventListener('mousemove',onMove);
-    document.addEventListener('mouseup',onUp);
+    e.preventDefault();e.stopPropagation();setResizing(true);
+    const sx=e.clientX,sw=w,aspect=w/h;
+    const onMv=mv=>{const dx=(mv.clientX-sx)/(zoom||1);const nw=Math.max(100,sw+dx);onResize(nw,nw/aspect);};
+    const onUp=()=>{setResizing(false);document.removeEventListener('mousemove',onMv);document.removeEventListener('mouseup',onUp);};
+    document.addEventListener('mousemove',onMv);document.addEventListener('mouseup',onUp);
   };
-
   return(
     <div style={{position:'absolute',left:x,top:y,width:w,height:h,cursor:'move'}}
-      onMouseEnter={()=>setHovered(true)}
-      onMouseLeave={()=>{ if(!resizing&&!moving)setHovered(false); }}
+      onMouseEnter={()=>setHovered(true)} onMouseLeave={()=>{if(!resizing&&!moving)setHovered(false);}}
       onMouseDown={startImgMove}>
-      <img src={dataUrl} draggable={false}
-        style={{display:'block',width:'100%',height:'100%',opacity:.55,userSelect:'none',borderRadius:4,pointerEvents:'none'}}/>
-      {/* Delete X */}
-      {(hovered||resizing||moving)&&(
-        <div onMouseDown={e=>{e.stopPropagation();onClear();}}
-          style={{position:'absolute',top:-10,right:-10,width:24,height:24,borderRadius:'50%',
-            background:'#e53e3e',border:'2px solid white',cursor:'pointer',
-            display:'flex',alignItems:'center',justifyContent:'center',
-            fontSize:13,color:'white',fontWeight:700,
-            boxShadow:'0 2px 8px rgba(0,0,0,.35)',zIndex:50}}>×</div>
-      )}
-      {/* Resize handle bottom-right */}
-      {(hovered||resizing||moving)&&(
-        <div onMouseDown={startImgResize} title="Drag to resize image"
-          style={{position:'absolute',bottom:-10,right:-10,width:22,height:22,borderRadius:'50%',
-            background:'#3d4a38',border:'2px solid white',cursor:'nwse-resize',
-            display:'flex',alignItems:'center',justifyContent:'center',
-            fontSize:12,color:'#a8bc9e',
-            boxShadow:'0 2px 8px rgba(0,0,0,.35)',zIndex:50,userSelect:'none'}}
-          onMouseEnter={e=>e.currentTarget.style.background='#6b7c62'}
-          onMouseLeave={e=>e.currentTarget.style.background='#3d4a38'}>⤡</div>
-      )}
+      <img src={dataUrl} draggable={false} style={{display:'block',width:'100%',height:'100%',opacity:.55,userSelect:'none',borderRadius:4,pointerEvents:'none'}}/>
+      {(hovered||resizing||moving)&&<>
+        <div onMouseDown={e=>{e.stopPropagation();onClear();}} style={{position:'absolute',top:-10,right:-10,width:24,height:24,borderRadius:'50%',background:'#e53e3e',border:'2px solid white',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,color:'white',fontWeight:700,boxShadow:'0 2px 8px rgba(0,0,0,.35)',zIndex:50}}>×</div>
+        <div onMouseDown={startImgResize} title="Drag to resize" style={{position:'absolute',bottom:-10,right:-10,width:22,height:22,borderRadius:'50%',background:'#3d4a38',border:'2px solid white',cursor:'nwse-resize',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,color:'#a8bc9e',boxShadow:'0 2px 8px rgba(0,0,0,.35)',zIndex:50,userSelect:'none'}} onMouseEnter={e=>e.currentTarget.style.background='#6b7c62'} onMouseLeave={e=>e.currentTarget.style.background='#3d4a38'}>⤡</div>
+      </>}
     </div>
   );
 }
@@ -355,17 +530,18 @@ function BgImage({dataUrl,w,h,x,y,onClear,onResize,onMove,zoom}){
 /* ══════════════════════════════════════════════════════════════════════════
    FLOORPLAN VIEW
 ══════════════════════════════════════════════════════════════════════════ */
-function FloorplanView({tables,fpDataRef,floorplanBg,onSetBg}){
+function FloorplanView({tables,fpDataRef,floorplanBg,onSetBg,initialPositions,initialRotations}){
   const outerRef=useRef(null);
   const bgFileRef=useRef(null);
   const[zoom,setZoom]=useState(1);
   const[pan,setPan]=useState({x:60,y:60});
-  const[rotations,setRotations]=useState({});
+  const[rotations,setRotations]=useState(initialRotations||{});
   const[hoveredTable,setHoveredTable]=useState(null);
   const[rotatingTable,setRotatingTable]=useState(null);
-  const zoomRef=useRef(1),panRef=useRef({x:60,y:60}),rotationsRef=useRef({});
+  const zoomRef=useRef(1),panRef=useRef({x:60,y:60}),rotationsRef=useRef(initialRotations||{});
 
   const[positions,setPositions]=useState(()=>{
+    if(initialPositions&&Object.keys(initialPositions).length>0)return initialPositions;
     const cols=Math.ceil(Math.sqrt(Math.max(tables.length,1))),pos={};
     tables.forEach((t,i)=>{const rl=t.shape==='rect'?getRectLayout(t.capacity,FP_SC):null;const w=rl?rl.svgW:CIRCLE_SVG*FP_SC,h=rl?rl.svgH:CIRCLE_SVG*FP_SC;pos[t.id]={x:(i%cols)*(w+40),y:Math.floor(i/cols)*(h+40)};});
     return pos;
@@ -381,30 +557,24 @@ function FloorplanView({tables,fpDataRef,floorplanBg,onSetBg}){
     });
   },[tables]);
 
-  // Sync to ref for export
   useEffect(()=>{if(fpDataRef)fpDataRef.current={positions,rotations};},[positions,rotations]);
 
   const dragRef=useRef(null);
 
   const startTableDrag=useCallback((e,tableId)=>{
-    e.preventDefault();e.stopPropagation();
-    document.body.classList.add('is-dragging');
+    e.preventDefault();e.stopPropagation();document.body.classList.add('is-dragging');
     const p=positions[tableId]||{x:0,y:0};
     dragRef.current={kind:'table',tableId,startX:e.clientX,startY:e.clientY,origX:p.x,origY:p.y};
   },[positions]);
 
   const startPan=useCallback(e=>{
-    e.preventDefault();
-    document.body.classList.add('is-dragging');
+    e.preventDefault();document.body.classList.add('is-dragging');
     dragRef.current={kind:'pan',startX:e.clientX,startY:e.clientY,origPanX:panRef.current.x,origPanY:panRef.current.y};
   },[]);
 
   const startRotate=useCallback((e,tableId,svgW,svgH)=>{
-    e.preventDefault();e.stopPropagation();
-    document.body.classList.add('is-rotating');
-    setRotatingTable(tableId);
-    const pos=positions[tableId]||{x:0,y:0};
-    const rect=outerRef.current.getBoundingClientRect();
+    e.preventDefault();e.stopPropagation();document.body.classList.add('is-rotating');setRotatingTable(tableId);
+    const pos=positions[tableId]||{x:0,y:0};const rect=outerRef.current.getBoundingClientRect();
     const cx=rect.left+panRef.current.x+(pos.x+svgW/2)*zoomRef.current;
     const cy=rect.top+panRef.current.y+(pos.y+svgH/2)*zoomRef.current;
     dragRef.current={kind:'rotate',tableId,startAngle:Math.atan2(e.clientY-cy,e.clientX-cx),startRotation:rotationsRef.current[tableId]||0,cx,cy};
@@ -424,13 +594,7 @@ function FloorplanView({tables,fpDataRef,floorplanBg,onSetBg}){
         setRotations(prev=>({...prev,[d.tableId]:nr}));
       }
     };
-    const onUp=()=>{
-      if(!dragRef.current)return;
-      document.body.classList.remove('is-dragging');
-      document.body.classList.remove('is-rotating');
-      setRotatingTable(null);
-      dragRef.current=null;
-    };
+    const onUp=()=>{if(!dragRef.current)return;document.body.classList.remove('is-dragging');document.body.classList.remove('is-rotating');setRotatingTable(null);dragRef.current=null;};
     document.addEventListener('mousemove',onMove);document.addEventListener('mouseup',onUp);
     return()=>{document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);};
   },[]);
@@ -471,11 +635,8 @@ function FloorplanView({tables,fpDataRef,floorplanBg,onSetBg}){
     reader.onload=ev=>{
       const img=new Image();
       img.onload=()=>{
-        // Display at max 1400px wide, preserve aspect ratio
-        const MAX=1400;
-        const scale=img.width>MAX?MAX/img.width:1;
+        const MAX=1400,scale=img.width>MAX?MAX/img.width:1;
         onSetBg({dataUrl:ev.target.result,w:img.width*scale,h:img.height*scale,x:0,y:0});
-        // Auto-fit view to show the image
         const el=outerRef.current;if(!el)return;
         const{width:vw,height:vh}=el.getBoundingClientRect();
         const fitZoom=Math.min(vw/(img.width*scale+120),vh/(img.height*scale+120),1);
@@ -484,26 +645,20 @@ function FloorplanView({tables,fpDataRef,floorplanBg,onSetBg}){
       };
       img.src=ev.target.result;
     };
-    reader.readAsDataURL(file);
-    e.target.value='';
+    reader.readAsDataURL(file);e.target.value='';
   };
 
   return(
     <div ref={outerRef} onMouseDown={startPan}
       style={{flex:1,overflow:'hidden',position:'relative',background:'#f0ede6',backgroundImage:'radial-gradient(circle,#c8cfc0 1px,transparent 1px)',backgroundSize:'28px 28px',cursor:'grab'}}>
       <div style={{position:'absolute',bottom:24,right:24,display:'flex',alignItems:'center',gap:8,zIndex:20,pointerEvents:'auto'}}>
-        {/* Upload / clear room image */}
         <input ref={bgFileRef} type="file" accept="image/*" onChange={handleBgUpload} style={{display:'none'}}/>
         <button onMouseDown={e=>e.stopPropagation()} onClick={()=>bgFileRef.current.click()}
           style={{padding:'7px 14px',borderRadius:8,border:'1.5px dashed rgba(255,255,255,.4)',background:'rgba(61,74,56,.8)',color:'#e8f0e4',cursor:'pointer',fontSize:11,letterSpacing:'.08em',fontFamily:'Georgia,serif'}}>
           ↑ Upload Room
         </button>
-        {floorplanBg&&(
-          <button onMouseDown={e=>e.stopPropagation()} onClick={()=>onSetBg(null)}
-            style={{padding:'7px 12px',borderRadius:8,border:'1.5px solid rgba(255,255,255,.2)',background:'rgba(61,74,56,.8)',color:'#a8bc9e',cursor:'pointer',fontSize:11,fontFamily:'Georgia,serif'}}>
-            ✕ Clear Room
-          </button>
-        )}
+        {floorplanBg&&<button onMouseDown={e=>e.stopPropagation()} onClick={()=>onSetBg(null)}
+          style={{padding:'7px 12px',borderRadius:8,border:'1.5px solid rgba(255,255,255,.2)',background:'rgba(61,74,56,.8)',color:'#a8bc9e',cursor:'pointer',fontSize:11,fontFamily:'Georgia,serif'}}>✕ Clear Room</button>}
         <div style={{background:'rgba(61,74,56,.78)',color:'#e8f0e4',borderRadius:8,padding:'6px 12px',fontSize:10.5,letterSpacing:'.08em',pointerEvents:'none'}}>
           Drag canvas to pan &nbsp;·&nbsp; Pinch or Ctrl+scroll to zoom &nbsp;·&nbsp; Hover table → ↻ to rotate
         </div>
@@ -515,15 +670,7 @@ function FloorplanView({tables,fpDataRef,floorplanBg,onSetBg}){
         </div>
       </div>
       <div style={{position:'absolute',transformOrigin:'0 0',transform:`translate(${pan.x}px,${pan.y}px) scale(${zoom})`}}>
-        {/* Room floorplan background */}
-        {floorplanBg&&(
-          <BgImage dataUrl={floorplanBg.dataUrl} w={floorplanBg.w} h={floorplanBg.h}
-            x={floorplanBg.x||0} y={floorplanBg.y||0}
-            onClear={()=>onSetBg(null)}
-            onResize={(nw,nh)=>onSetBg({...floorplanBg,w:nw,h:nh})}
-            onMove={(nx,ny)=>onSetBg({...floorplanBg,x:nx,y:ny})}
-            zoom={zoom}/>
-        )}
+        {floorplanBg&&<BgImage dataUrl={floorplanBg.dataUrl} w={floorplanBg.w} h={floorplanBg.h} x={floorplanBg.x||0} y={floorplanBg.y||0} onClear={()=>onSetBg(null)} onResize={(nw,nh)=>onSetBg({...floorplanBg,w:nw,h:nh})} onMove={(nx,ny)=>onSetBg({...floorplanBg,x:nx,y:ny})} zoom={zoom}/>}
         {tables.map(table=>{
           const isRect=table.shape==='rect';
           const rl=isRect?getRectLayout(table.capacity,FP_SC):null;
@@ -532,14 +679,11 @@ function FloorplanView({tables,fpDataRef,floorplanBg,onSetBg}){
           const rot=rotations[table.id]||0;
           const isDraggingThis=dragRef.current?.tableId===table.id;
           return(
-            <div key={table.id}
-              onMouseDown={e=>startTableDrag(e,table.id)}
-              onMouseEnter={()=>setHoveredTable(table.id)}
-              onMouseLeave={()=>setHoveredTable(null)}
+            <div key={table.id} onMouseDown={e=>startTableDrag(e,table.id)}
+              onMouseEnter={()=>setHoveredTable(table.id)} onMouseLeave={()=>setHoveredTable(null)}
               style={{position:'absolute',left:pos.x,top:pos.y,width:svgW,height:svgH,transform:`rotate(${rot}deg)`,transformOrigin:'50% 50%',cursor:'grab',userSelect:'none',zIndex:isDraggingThis?100:1}}>
               <div style={{filter:'drop-shadow(0 4px 14px rgba(61,74,56,.2))'}}><TableSVG table={table} sc={FP_SC}/></div>
               <div style={{textAlign:'center',fontSize:9,letterSpacing:'.12em',textTransform:'uppercase',color:P.brownMid,fontWeight:700,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:svgW}}>{table.name}</div>
-              {/* Rotate handle */}
               {isRect&&(hoveredTable===table.id||rotatingTable===table.id)&&(
                 <div onMouseDown={e=>startRotate(e,table.id,svgW,svgH)} title="Drag to rotate · Shift=15° snap"
                   style={{position:'absolute',top:-12,right:-12,width:22,height:22,borderRadius:'50%',background:'#3d4a38',border:'2.5px solid #f4efe6',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,color:'#a8bc9e',cursor:'crosshair',boxShadow:'0 2px 8px rgba(0,0,0,.35)',zIndex:20,userSelect:'none'}}
@@ -557,29 +701,67 @@ function FloorplanView({tables,fpDataRef,floorplanBg,onSetBg}){
 /* ══════════════════════════════════════════════════════════════════════════
    MAIN APP
 ══════════════════════════════════════════════════════════════════════════ */
-function App(){
-  const[tables,setTables]=useState([]);
-  const[tableOrder,setTableOrder]=useState([]);
-  const[unassigned,setUnassigned]=useState([]);
+function App({session,chartId:initChartId,chartName:initChartName,initialData,onBack}){
+  const[tables,setTables]=useState(initialData?.tables||[]);
+  const[tableOrder,setTableOrder]=useState(initialData?.tableOrder||[]);
+  const[unassigned,setUnassigned]=useState(initialData?.unassigned||[]);
   const[drag,setDrag]=useState(null);
   const[overSeat,setOverSeat]=useState(null);
   const[dropTarget,setDropTarget]=useState(null);
   const[overList,setOverList]=useState(false);
   const[newName,setNewName]=useState('');
   const[newCount,setNewCount]=useState(1);
-  const[floorplanBg,setFloorplanBg]=useState(null); // {dataUrl, w, h}
-  const[showWizard,setShowWizard]=useState(true);
+  const[floorplanBg,setFloorplanBg]=useState(initialData?.floorplanBg||null);
+  const[showWizard,setShowWizard]=useState(!initialData&&(initialData?.tables||[]).length===0);
   const[showModal,setShowModal]=useState(false);
   const[view,setView]=useState('tables');
   const[editingGuestId,setEditingGuestId]=useState(null);
   const[editGuestVal,setEditGuestVal]=useState('');
+  const[chartId,setChartId]=useState(initChartId||null);
+  const[chartName,setChartName]=useState(initChartName||'Untitled Chart');
+  const[editingChartName,setEditingChartName]=useState(false);
+  const[saving,setSaving]=useState(false);
+  const[saveMsg,setSaveMsg]=useState('');
   const fileRef=useRef(null);
   const dragRef=useRef(null);
   const tablesRef=useRef(tables);
   const unassignedRef=useRef(unassigned);
-  const fpDataRef=useRef({positions:{},rotations:{}});
+  const fpDataRef=useRef({
+    positions:initialData?.fpPositions||{},
+    rotations:initialData?.fpRotations||{}
+  });
   useEffect(()=>{tablesRef.current=tables;},[tables]);
   useEffect(()=>{unassignedRef.current=unassigned;},[unassigned]);
+
+  // If loading a chart with tables, skip the wizard
+  useEffect(()=>{
+    if(tables.length>0)setShowWizard(false);
+  },[]);
+
+  /* ── Save ────────────────────────────────────────────────────────────── */
+  const saveChart=async()=>{
+    setSaving(true);setSaveMsg('');
+    const data={
+      tables,tableOrder,unassigned,floorplanBg,
+      fpPositions:fpDataRef.current.positions,
+      fpRotations:fpDataRef.current.rotations,
+    };
+    try{
+      if(chartId){
+        const{error}=await supabase.from('charts').update({name:chartName,data,updated_at:new Date().toISOString()}).eq('id',chartId);
+        if(error)throw error;
+      }else{
+        const{data:row,error}=await supabase.from('charts').insert({user_id:session.user.id,name:chartName,data}).select().single();
+        if(error)throw error;
+        setChartId(row.id);
+      }
+      setSaveMsg('Saved!');
+      setTimeout(()=>setSaveMsg(''),2500);
+    }catch(e){
+      setSaveMsg('Error saving');
+    }
+    setSaving(false);
+  };
 
   /* ── Guest name editing ──────────────────────────────────────────────── */
   const startEditGuest=(id,name)=>{setEditingGuestId(id);setEditGuestVal(name);};
@@ -597,139 +779,74 @@ function App(){
     const{jsPDF}=window.jspdf;
     const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
     const PW=210,PH=297,M=18,CW=PW-M*2;
-
     const drawHeader=(title)=>{
       doc.setFillColor(61,74,56);doc.rect(0,0,PW,22,'F');
       doc.setTextColor(244,239,230);doc.setFont('helvetica','bold');doc.setFontSize(16);doc.text('EasySeat',M,14);
       doc.setFontSize(9);doc.setFont('helvetica','normal');doc.text(title,PW-M,14,{align:'right'});
     };
-
-    // ── Page 1+: Seating assignments ──
     drawHeader('Seating Assignments');
     let y=32;
     const orderedTbls=tableOrder.map(id=>tables.find(t=>t.id===id)).filter(Boolean);
-
     for(const table of orderedTbls){
       const seen=new Set(),guests=[];
       table.guests.forEach(g=>{if(g&&!seen.has(g.id)){seen.add(g.id);guests.push(g);}});
-      guests.sort((a,b)=>{
-        const la=a.name.trim().split(/\s+/).pop().toLowerCase();
-        const lb=b.name.trim().split(/\s+/).pop().toLowerCase();
-        return la.localeCompare(lb);
-      });
+      guests.sort((a,b)=>{const la=a.name.trim().split(/\s+/).pop().toLowerCase(),lb=b.name.trim().split(/\s+/).pop().toLowerCase();return la.localeCompare(lb);});
       const rowH=guests.length===0?18:10+guests.length*5.8+6;
       if(y+rowH>PH-16){doc.addPage();drawHeader('Seating Assignments (cont.)');y=32;}
-
-      // Table header bar
       doc.setFillColor(236,232,222);doc.roundedRect(M,y-5,CW,9,2,2,'F');
       doc.setTextColor(61,74,56);doc.setFont('helvetica','bold');doc.setFontSize(11);doc.text(table.name,M+4,y+1);
       const filled=table.guests.filter(Boolean).length;
       doc.setFontSize(9);doc.setFont('helvetica','normal');doc.setTextColor(143,160,134);
       doc.text(`${filled}/${table.capacity} seats`,PW-M-2,y+1,{align:'right'});
       y+=8;
-
-      if(guests.length===0){
-        doc.setFont('helvetica','italic');doc.setFontSize(9);doc.setTextColor(190,190,190);
-        doc.text('No guests assigned',M+6,y);y+=6;
-      }else{
-        doc.setFont('helvetica','normal');doc.setFontSize(10);doc.setTextColor(61,74,56);
-        for(const g of guests){
-          if(y>PH-16){doc.addPage();drawHeader('Seating Assignments (cont.)');y=32;}
-          const label=g.count>1?`${g.name}  (party of ${g.count})`:g.name;
-          doc.text(`  ${label}`,M+4,y);y+=5.8;
-        }
-      }
+      if(guests.length===0){doc.setFont('helvetica','italic');doc.setFontSize(9);doc.setTextColor(190,190,190);doc.text('No guests assigned',M+6,y);y+=6;}
+      else{doc.setFont('helvetica','normal');doc.setFontSize(10);doc.setTextColor(61,74,56);for(const g of guests){if(y>PH-16){doc.addPage();drawHeader('Seating Assignments (cont.)');y=32;}const label=g.count>1?`${g.name}  (party of ${g.count})`:g.name;doc.text(`  ${label}`,M+4,y);y+=5.8;}}
       y+=5;
     }
-
-    // ── Floorplan page ──
-    doc.addPage();
-    drawHeader('Table Floorplan');
-
-    // Get positions — use synced data or generate defaults
+    // Floorplan page
+    doc.addPage();drawHeader('Table Floorplan');
     let{positions,rotations}=fpDataRef.current;
     if(!positions||Object.keys(positions).length===0){
-      const cols=Math.ceil(Math.sqrt(Math.max(orderedTbls.length,1)));
-      positions={};rotations={};
-      orderedTbls.forEach((t,i)=>{
-        const rl=t.shape==='rect'?getRectLayout(t.capacity,FP_SC):null;
-        const w=rl?rl.svgW:CIRCLE_SVG*FP_SC,h=rl?rl.svgH:CIRCLE_SVG*FP_SC;
-        positions[t.id]={x:(i%cols)*(w+40),y:Math.floor(i/cols)*(h+40)};
-      });
+      const cols=Math.ceil(Math.sqrt(Math.max(orderedTbls.length,1)));positions={};rotations={};
+      orderedTbls.forEach((t,i)=>{const rl=t.shape==='rect'?getRectLayout(t.capacity,FP_SC):null;const w=rl?rl.svgW:CIRCLE_SVG*FP_SC,h=rl?rl.svgH:CIRCLE_SVG*FP_SC;positions[t.id]={x:(i%cols)*(w+40),y:Math.floor(i/cols)*(h+40)};});
     }
-
-    if(orderedTbls.length===0){
-      doc.setTextColor(190,190,190);doc.setFont('helvetica','italic');doc.setFontSize(12);
-      doc.text('No tables to display',PW/2,PH/2,{align:'center'});
-    }else{
-      // Find bounding box
+    if(orderedTbls.length>0){
       let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
-      orderedTbls.forEach(t=>{
-        const pos=positions[t.id];if(!pos)return;
-        const rl=t.shape==='rect'?getRectLayout(t.capacity,FP_SC):null;
-        const w=rl?rl.svgW:CIRCLE_SVG*FP_SC,h=rl?rl.svgH:CIRCLE_SVG*FP_SC;
-        minX=Math.min(minX,pos.x);minY=Math.min(minY,pos.y);
-        maxX=Math.max(maxX,pos.x+w);maxY=Math.max(maxY,pos.y+h);
-      });
+      orderedTbls.forEach(t=>{const pos=positions[t.id];if(!pos)return;const rl=t.shape==='rect'?getRectLayout(t.capacity,FP_SC):null;const w=rl?rl.svgW:CIRCLE_SVG*FP_SC,h=rl?rl.svgH:CIRCLE_SVG*FP_SC;minX=Math.min(minX,pos.x);minY=Math.min(minY,pos.y);maxX=Math.max(maxX,pos.x+w);maxY=Math.max(maxY,pos.y+h);});
       const PAD=50,contentW=maxX-minX+PAD*2,contentH=maxY-minY+PAD*2;
       const PDF_W=CW*3.78,PDF_H=(PH-34)*3.78;
       const ds=Math.min(PDF_W/contentW,PDF_H/contentH);
-
       const canvas=document.createElement('canvas');
       canvas.width=Math.ceil(contentW*ds);canvas.height=Math.ceil(contentH*ds);
       const ctx=canvas.getContext('2d');
-
-      // Background
       ctx.fillStyle='#f0ede6';ctx.fillRect(0,0,canvas.width,canvas.height);
-      // Dot grid
       ctx.fillStyle='#d0d7c8';
       for(let gx=0;gx<canvas.width;gx+=28*ds)for(let gy=0;gy<canvas.height;gy+=28*ds){ctx.beginPath();ctx.arc(gx,gy,1.2,0,Math.PI*2);ctx.fill();}
-
-      // Draw each table
       orderedTbls.forEach(table=>{
         const pos=positions[table.id];if(!pos)return;
         const rot=((rotations[table.id]||0)*Math.PI)/180;
         const rl=table.shape==='rect'?getRectLayout(table.capacity,FP_SC):null;
         const w=rl?rl.svgW:CIRCLE_SVG*FP_SC,h=rl?rl.svgH:CIRCLE_SVG*FP_SC;
         const tcx=(pos.x+w/2-minX+PAD)*ds,tcy=(pos.y+h/2-minY+PAD)*ds;
-
         ctx.save();ctx.translate(tcx,tcy);ctx.rotate(rot);
-
-        // Table body
         ctx.fillStyle='#ece8de';ctx.strokeStyle='#7a8c72';ctx.lineWidth=1.8*ds;
-        if(table.shape==='rect'){
-          const tw=rl.tableW*ds,th=rl.tableH*ds,rr=4*ds;
-          cRoundRect(ctx,-tw/2,-th/2,tw,th,rr);ctx.fill();ctx.stroke();
-        }else{
-          const tr=TABLE_R*FP_SC*ds;ctx.beginPath();ctx.arc(0,0,tr,0,Math.PI*2);ctx.fill();ctx.stroke();
-        }
-
-        // Seats
+        if(table.shape==='rect'){const tw=rl.tableW*ds,th=rl.tableH*ds,rr=4*ds;cRoundRect(ctx,-tw/2,-th/2,tw,th,rr);ctx.fill();ctx.stroke();}
+        else{const tr=TABLE_R*FP_SC*ds;ctx.beginPath();ctx.arc(0,0,tr,0,Math.PI*2);ctx.fill();ctx.stroke();}
         const seats=table.shape==='rect'?getRectLayout(table.capacity,FP_SC).positions:circleSeats(table.capacity,FP_SC);
         const sr=(table.shape==='rect'?rl.seatR:SEAT_R*FP_SC)*ds;
-        seats.forEach((sp,i)=>{
-          const en=table.guests[i];
-          ctx.beginPath();ctx.arc(sp.x*ds,sp.y*ds,sr,0,Math.PI*2);
-          ctx.fillStyle=en?'#cdd8c7':'#f0ece3';ctx.strokeStyle=en?'#6b7c62':'#c4cbbe';ctx.lineWidth=ds;
-          ctx.fill();ctx.stroke();
-        });
-
-        // Label
+        seats.forEach((sp,i)=>{const en=table.guests[i];ctx.beginPath();ctx.arc(sp.x*ds,sp.y*ds,sr,0,Math.PI*2);ctx.fillStyle=en?'#cdd8c7':'#f0ece3';ctx.strokeStyle=en?'#6b7c62':'#c4cbbe';ctx.lineWidth=ds;ctx.fill();ctx.stroke();});
         const fs=Math.max(10,11*ds);
-        ctx.fillStyle='#7a8c72';ctx.font=`bold ${fs}px Georgia,serif`;
-        ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(svgLabel(table.name),0,0);
+        ctx.fillStyle='#7a8c72';ctx.font=`bold ${fs}px Georgia,serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(svgLabel(table.name),0,0);
         ctx.restore();
       });
-
       const imgData=canvas.toDataURL('image/png');
       const imgH=CW*(canvas.height/canvas.width);
       doc.addImage(imgData,'PNG',M,26,CW,Math.min(imgH,PH-34));
     }
-
-    doc.save('easyseat-seating-chart.pdf');
+    doc.save(`${chartName.replace(/[^a-z0-9]/gi,'-')}.pdf`);
   };
 
-  /* ── Mouse drag system (Tables view) ──────────────────────────────────── */
+  /* ── Mouse drag system ───────────────────────────────────────────────── */
   useEffect(()=>{
     if(!drag||view!=='tables')return;
     document.body.classList.add('is-dragging');
@@ -777,25 +894,21 @@ function App(){
     setUnassigned(ua2);setTables(tbs);
   };
   const doTableDrop=(fromId,toId)=>{setTableOrder(prev=>{const n=[...prev],fi=n.indexOf(fromId),ti=n.indexOf(toId);if(fi===-1||ti===-1)return prev;n.splice(fi,1);n.splice(ti,0,fromId);return n;});};
+
   const startGuestDrag=(e,entry,source)=>{
     e.preventDefault();
     const sx=e.clientX,sy=e.clientY;
     const pending={type:'guest',entry,source,x:sx,y:sy};
     const onMove=mv=>{
-      if(Math.hypot(mv.clientX-sx,mv.clientY-sy)>5){
-        cleanup();
-        dragRef.current={...pending,x:mv.clientX,y:mv.clientY};
-        setDrag({...pending,x:mv.clientX,y:mv.clientY});
-      }
+      if(Math.hypot(mv.clientX-sx,mv.clientY-sy)>5){cleanup();dragRef.current={...pending,x:mv.clientX,y:mv.clientY};setDrag({...pending,x:mv.clientX,y:mv.clientY});}
     };
     const onUp=()=>cleanup();
     const cleanup=()=>{document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);};
-    document.addEventListener('mousemove',onMove);
-    document.addEventListener('mouseup',onUp);
+    document.addEventListener('mousemove',onMove);document.addEventListener('mouseup',onUp);
   };
   const startTableDrag=(e,tableId,tableName,table,offset)=>{e.preventDefault();const d={type:'table',tableId,tableName,table,offsetX:offset.offsetX,offsetY:offset.offsetY,x:e.clientX,y:e.clientY};dragRef.current=d;setDrag(d);};
 
-  /* ── Table / guest management ─────────────────────────────────────────── */
+  /* ── Table/guest management ──────────────────────────────────────────── */
   const addTables=(count,capacity,shape)=>{
     const newTs=[],newIds=[];
     for(let i=0;i<count;i++){const id=tuid();newTs.push({id,name:`Table ${id}`,capacity,shape,guests:Array(capacity).fill(null)});newIds.push(id);}
@@ -830,19 +943,38 @@ function App(){
       {showModal&&<AddTableModal onAdd={addTables} onClose={()=>setShowModal(false)}/>}
 
       {/* Header */}
-      <header style={{background:'linear-gradient(135deg,#3d4a38 0%,#4e5e48 100%)',padding:'14px 28px',display:'flex',alignItems:'center',justifyContent:'space-between',boxShadow:'0 4px 20px rgba(0,0,0,.25)',flexShrink:0}}>
-        <div>
-          <div style={{fontSize:20,color:'#f4efe6',letterSpacing:'.22em',textTransform:'uppercase',fontWeight:700}}>EasySeat</div>
-          <div style={{fontSize:10,color:'#a8bc9e',marginTop:3,letterSpacing:'.14em',textTransform:'uppercase'}}>{totalFilled} of {totalSeats} seats filled &nbsp;·&nbsp; {totalUP} {totalUP===1?'person':'people'} unassigned</div>
+      <header style={{background:'linear-gradient(135deg,#3d4a38 0%,#4e5e48 100%)',padding:'12px 24px',display:'flex',alignItems:'center',justifyContent:'space-between',boxShadow:'0 4px 20px rgba(0,0,0,.25)',flexShrink:0,gap:12}}>
+        {/* Left: back + name */}
+        <div style={{display:'flex',alignItems:'center',gap:12,minWidth:0}}>
+          <button onClick={onBack} title="Back to dashboard" style={{background:'rgba(255,255,255,.12)',border:'none',color:'#f4efe6',cursor:'pointer',borderRadius:6,padding:'6px 10px',fontSize:13,flexShrink:0}}>←</button>
+          <div style={{fontSize:16,color:'#f4efe6',letterSpacing:'.18em',textTransform:'uppercase',fontWeight:700,flexShrink:0}}>EasySeat</div>
+          {editingChartName
+            ?<input autoFocus value={chartName} onChange={e=>setChartName(e.target.value)}
+                onBlur={()=>setEditingChartName(false)}
+                onKeyDown={e=>{if(e.key==='Enter'||e.key==='Escape')setEditingChartName(false);}}
+                style={{fontSize:13,color:'#f4efe6',background:'rgba(255,255,255,.15)',border:'none',borderBottom:'1.5px solid rgba(255,255,255,.4)',outline:'none',padding:'2px 6px',borderRadius:4,letterSpacing:'.05em',minWidth:120,maxWidth:240}}/>
+            :<span onClick={()=>setEditingChartName(true)} title="Click to rename" style={{fontSize:13,color:'rgba(244,239,230,.8)',letterSpacing:'.05em',cursor:'text',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                {chartName}
+              </span>
+          }
+          <div style={{fontSize:10,color:'#a8bc9e',letterSpacing:'.12em',textTransform:'uppercase',flexShrink:0}}>{totalFilled}/{totalSeats} seats</div>
         </div>
-        <div style={{display:'flex',alignItems:'center',background:'rgba(0,0,0,.25)',borderRadius:10,padding:3,gap:2}}>
+
+        {/* Center: toggle */}
+        <div style={{display:'flex',alignItems:'center',background:'rgba(0,0,0,.25)',borderRadius:10,padding:3,gap:2,flexShrink:0}}>
           {['tables','floorplan'].map(v=>(
-            <button key={v} onClick={()=>setView(v)} style={{padding:'8px 22px',borderRadius:8,border:'none',cursor:'pointer',background:view===v?'#f4efe6':'transparent',color:view===v?P.brown:'rgba(244,239,230,.65)',fontFamily:'Georgia,serif',fontSize:11,fontWeight:view===v?700:400,letterSpacing:'.12em',textTransform:'uppercase',transition:'all .18s',boxShadow:view===v?'0 2px 8px rgba(0,0,0,.18)':'none'}}>
+            <button key={v} onClick={()=>setView(v)} style={{padding:'7px 18px',borderRadius:8,border:'none',cursor:'pointer',background:view===v?'#f4efe6':'transparent',color:view===v?P.brown:'rgba(244,239,230,.65)',fontFamily:'Georgia,serif',fontSize:11,fontWeight:view===v?700:400,letterSpacing:'.12em',textTransform:'uppercase',transition:'all .18s',boxShadow:view===v?'0 2px 8px rgba(0,0,0,.18)':'none'}}>
               {v==='tables'?'⊞ Tables':'⌖ Floorplan'}
             </button>
           ))}
         </div>
-        <div style={{display:'flex',gap:8}}>
+
+        {/* Right: save + export + add tables */}
+        <div style={{display:'flex',alignItems:'center',gap:8,flexShrink:0}}>
+          {saveMsg&&<span style={{fontSize:11,color:saveMsg==='Saved!'?'#a8e6a0':'#ffb3b3',letterSpacing:'.08em'}}>{saveMsg}</span>}
+          <button onClick={saveChart} disabled={saving} style={{...btnStyle,background:'#4a8c5a',color:'#f4efe6',opacity:saving?.7:1}}>
+            {saving?'Saving…':'💾 Save'}
+          </button>
           <button onClick={()=>setShowModal(true)} style={{...btnStyle,background:'#6b7c62',color:'#f4efe6'}}>+ Add Tables</button>
           <button onClick={exportPDF} style={{...btnStyle,background:'rgba(255,255,255,.15)',color:'#f4efe6',border:'1px solid rgba(255,255,255,.25)'}}>↓ Export PDF</button>
         </div>
@@ -864,29 +996,17 @@ function App(){
               <button onClick={()=>fileRef.current.click()} style={{width:'100%',padding:'8px 10px',borderRadius:6,background:'transparent',border:`1.5px dashed ${P.gold}`,color:P.brownMid,cursor:'pointer',fontSize:11,letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'Georgia,serif',transition:'background .15s'}}>↑ Upload Guest List</button>
               <div style={{fontSize:9.5,color:P.brownLight,marginTop:5,lineHeight:1.5}}>.txt or .csv · one name per line<br/>Groups: "Smith Family (5)"</div>
             </div>
-
-            {/* Guest list */}
             <div data-drop-zone="unassigned" style={{flex:1,overflowY:'auto',padding:'8px 10px',background:overList?'#d8ead4':'transparent',transition:'background .15s'}}>
               {overList&&drag&&drag.type==='guest'&&<div style={{textAlign:'center',padding:'8px 6px',marginBottom:6,border:'2px dashed #6b7c62',borderRadius:8,color:'#6b7c62',fontSize:11,fontStyle:'italic'}}>Drop to unassign</div>}
               {unassigned.length===0&&!overList&&<div style={{textAlign:'center',color:P.brownLight,fontSize:12,padding:'24px 10px',fontStyle:'italic'}}>Add guests here</div>}
               {unassigned.map(entry=>(
-                <div key={entry.id}
-                  onMouseDown={e=>startGuestDrag(e,entry,'unassigned')}
+                <div key={entry.id} onMouseDown={e=>startGuestDrag(e,entry,'unassigned')}
                   style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 9px',marginBottom:4,borderRadius:7,background:drag&&drag.type==='guest'&&drag.entry.id===entry.id?'#c8dbc4':entry.count>1?'#d4e8d0':P.cream,border:`1px solid ${drag&&drag.type==='guest'&&drag.entry.id===entry.id?'#6b7c62':entry.count>1?'#8faa88':P.border}`,cursor:editingGuestId===entry.id?'default':'grab',userSelect:'none',opacity:drag&&drag.type==='guest'&&drag.entry.id===entry.id?.45:1}}>
                   <span style={{display:'flex',alignItems:'center',gap:5,minWidth:0,flex:1}}>
                     <span>{entry.count>1?'👨‍👩‍👧':'🪑'}</span>
                     {editingGuestId===entry.id
-                      ?<input autoFocus value={editGuestVal} onChange={e=>setEditGuestVal(e.target.value)}
-                          onMouseDown={e=>e.stopPropagation()}
-                          onBlur={submitEditGuest}
-                          onKeyDown={e=>{if(e.key==='Enter')submitEditGuest();if(e.key==='Escape'){setEditingGuestId(null);setEditGuestVal('');}}}
-                          style={{flex:1,fontSize:12,background:'transparent',border:'none',borderBottom:`1.5px solid ${P.gold}`,outline:'none',fontFamily:'Georgia,serif',color:P.brown,minWidth:0}}/>
-                      :<span
-                          onDoubleClick={e=>{e.stopPropagation();startEditGuest(entry.id,entry.name);}}
-                          title="Double-click to edit name"
-                          style={{color:entry.count>1?'#2d4a28':P.brown,fontWeight:entry.count>1?600:400,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',fontSize:12.5,cursor:'grab',flex:1}}>
-                          {entry.name}
-                        </span>
+                      ?<input autoFocus value={editGuestVal} onChange={e=>setEditGuestVal(e.target.value)} onMouseDown={e=>e.stopPropagation()} onBlur={submitEditGuest} onKeyDown={e=>{if(e.key==='Enter')submitEditGuest();if(e.key==='Escape'){setEditingGuestId(null);setEditGuestVal('');}}} style={{flex:1,fontSize:12,background:'transparent',border:'none',borderBottom:`1.5px solid ${P.gold}`,outline:'none',fontFamily:'Georgia,serif',color:P.brown,minWidth:0}}/>
+                      :<span onDoubleClick={e=>{e.stopPropagation();startEditGuest(entry.id,entry.name);}} title="Double-click to edit name" style={{color:entry.count>1?'#2d4a28':P.brown,fontWeight:entry.count>1?600:400,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',fontSize:12.5,cursor:'grab',flex:1}}>{entry.name}</span>
                     }
                     {entry.count>1&&editingGuestId!==entry.id&&<span style={{background:'#4a5e45',color:'#f4efe6',borderRadius:10,padding:'1px 7px',fontSize:10,fontWeight:700,flexShrink:0}}>×{entry.count}</span>}
                   </span>
@@ -894,7 +1014,6 @@ function App(){
                 </div>
               ))}
             </div>
-
             <div style={{padding:'10px 12px',borderTop:`1px solid ${P.border}`,fontSize:10.5,color:P.brownLight,lineHeight:1.85}}>
               <div>🖱 <b>Drag</b> guests to seats</div>
               <div>✎ <b>Double-click name</b> to edit</div>
@@ -906,34 +1025,127 @@ function App(){
           </aside>
         )}
 
-        {/* Tables canvas - always mounted, hidden when in floorplan */}
         <main style={{flex:1,overflow:'auto',padding:'24px 28px',position:'relative',display:view==='tables'?'block':'none'}}>
-            {orderedTables.length===0?(
-              <div className="empty-state" style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:16}}>
-                <div style={{fontSize:40,animation:'shimmer 2.5s ease infinite'}}>🪑</div>
-                <div style={{fontSize:16,color:P.brownLight,fontStyle:'italic'}}>No tables yet</div>
-                <button onClick={()=>setShowModal(true)} style={{padding:'13px 36px',borderRadius:10,border:'none',background:'#3d4a38',color:'#f4efe6',cursor:'pointer',fontSize:12,letterSpacing:'.15em',textTransform:'uppercase',fontFamily:'Georgia,serif',fontWeight:700,boxShadow:'0 4px 16px rgba(61,74,56,.3)'}}>+ Add Tables</button>
-              </div>
-            ):(
-              <div style={{display:'flex',flexWrap:'wrap',gap:26,alignItems:'flex-start'}}>
-                {orderedTables.map(table=>{
-                  const info=getBlockInfo(table.id);
-                  return(<TableCard key={table.id} table={table} overSeat={overSeat} drag={drag} isDropTarget={dropTarget===table.id} onSeatMouseDown={startGuestDrag} onUnassign={unassignFromSeat} onRemove={removeTable} onHandleMouseDown={startTableDrag} onRename={renameTable} isBlockedAndOver={!!info} blockedMsg={info&&info.msg}/>);
-                })}
-              </div>
-            )}
-          </main>
+          {orderedTables.length===0?(
+            <div className="empty-state" style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:16}}>
+              <div style={{fontSize:40,animation:'shimmer 2.5s ease infinite'}}>🪑</div>
+              <div style={{fontSize:16,color:P.brownLight,fontStyle:'italic'}}>No tables yet</div>
+              <button onClick={()=>setShowModal(true)} style={{padding:'13px 36px',borderRadius:10,border:'none',background:'#3d4a38',color:'#f4efe6',cursor:'pointer',fontSize:12,letterSpacing:'.15em',textTransform:'uppercase',fontFamily:'Georgia,serif',fontWeight:700,boxShadow:'0 4px 16px rgba(61,74,56,.3)'}}>+ Add Tables</button>
+            </div>
+          ):(
+            <div style={{display:'flex',flexWrap:'wrap',gap:26,alignItems:'flex-start'}}>
+              {orderedTables.map(table=>{
+                const info=getBlockInfo(table.id);
+                return(<TableCard key={table.id} table={table} overSeat={overSeat} drag={drag} isDropTarget={dropTarget===table.id} onSeatMouseDown={startGuestDrag} onUnassign={unassignFromSeat} onRemove={removeTable} onHandleMouseDown={startTableDrag} onRename={renameTable} isBlockedAndOver={!!info} blockedMsg={info&&info.msg}/>);
+              })}
+            </div>
+          )}
+        </main>
 
-        {/* Floorplan - always mounted, hidden when in tables */}
         <div style={{display:view==='floorplan'?'flex':'none',flex:1,overflow:'hidden'}}>
-          <FloorplanView tables={orderedTables} fpDataRef={fpDataRef} floorplanBg={floorplanBg} onSetBg={setFloorplanBg}/>
+          <FloorplanView tables={orderedTables} fpDataRef={fpDataRef} floorplanBg={floorplanBg} onSetBg={setFloorplanBg}
+            initialPositions={fpDataRef.current.positions} initialRotations={fpDataRef.current.rotations}/>
         </div>
       </div>
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+/* ══════════════════════════════════════════════════════════════════════════
+   LANDING PAGE
+══════════════════════════════════════════════════════════════════════════ */
+function LandingPage({onGetStarted}){
+  return(
+    <div style={{minHeight:'100vh',background:'radial-gradient(ellipse at 50% 40%, #edf4ea 0%, #f4efe6 65%)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:24}}>
+      <div style={{position:'absolute',width:500,height:500,borderRadius:'50%',border:'1px solid rgba(122,140,114,.12)',pointerEvents:'none'}}/>
+      <div style={{position:'absolute',width:380,height:380,borderRadius:'50%',border:'1px solid rgba(122,140,114,.1)',pointerEvents:'none'}}/>
+      <div className="wizard-card" style={{textAlign:'center',maxWidth:480,zIndex:1}}>
+        <svg width="80" height="60" viewBox="0 0 80 60" style={{marginBottom:16}}>
+          <circle cx="40" cy="30" r="10" fill="none" stroke="#7a8c72" strokeWidth="1.5"/>
+          {[0,60,120,180,240,300].map(a=>{const r=a*Math.PI/180,x1=40+12*Math.cos(r),y1=30+12*Math.sin(r),x2=40+24*Math.cos(r),y2=30+24*Math.sin(r);return<g key={a}><line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#7a8c72" strokeWidth="1"/><circle cx={x2} cy={y2} r="3.5" fill="#a8bc9e"/></g>;})}
+          <circle cx="40" cy="30" r="5" fill="#7a8c72"/>
+        </svg>
+        <div style={{fontSize:30,letterSpacing:'.14em',textTransform:'uppercase',color:P.brown,marginBottom:6}}>EasySeat</div>
+        <div style={{width:60,height:1.5,background:P.gold,margin:'0 auto 28px'}}/>
+        <div style={{fontSize:14,color:P.brownMid,lineHeight:1.8,marginBottom:32}}>
+          The easiest way to build your seating chart.<br/>
+          Drag &amp; drop guests, design your floorplan,<br/>and export with one click.
+        </div>
+        <button onClick={onGetStarted} style={{padding:'14px 40px',borderRadius:10,border:'none',background:'#3d4a38',color:'#f4efe6',cursor:'pointer',fontSize:12,letterSpacing:'.15em',textTransform:'uppercase',fontFamily:'Georgia,serif',fontWeight:700,boxShadow:'0 4px 16px rgba(61,74,56,.3)'}}>
+          Get Started →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ROOT — landing → auth → dashboard → app
+══════════════════════════════════════════════════════════════════════════ */
+function Root(){
+  const[session,setSession]=useState(undefined);
+  const[screen,setScreen]=useState('dashboard');
+  const[landed,setLanded]=useState(false); // false = show landing first
+  const[openChartId,setOpenChartId]=useState(null);
+  const[openChartName,setOpenChartName]=useState('');
+  const[openChartData,setOpenChartData]=useState(null);
+  const[loadingChart,setLoadingChart]=useState(false);
+
+  useEffect(()=>{
+    supabase.auth.getSession().then(({data:{session}})=>setSession(session));
+    const{data:{subscription}}=supabase.auth.onAuthStateChange((_,session)=>setSession(session));
+    return()=>subscription.unsubscribe();
+  },[]);
+
+  const handleOpenChart=async(id,name)=>{
+    setLoadingChart(true);
+    const{data,error}=await supabase.from('charts').select('data').eq('id',id).single();
+    if(!error&&data){
+      const d=data.data||{};
+      if(d.tables?.length){const maxId=Math.max(...d.tables.map(t=>t.id||0));if(maxId>=_tid)_tid=maxId+1;}
+      if(d.unassigned?.length){const maxGid=Math.max(...d.unassigned.map(g=>+(g.id?.replace('g','')||0)));if(maxGid>=_gid)_gid=maxGid+1;}
+      setOpenChartData(d);
+    }
+    setOpenChartId(id);setOpenChartName(name);setScreen('app');setLoadingChart(false);
+  };
+
+  const handleNewChart=()=>{setOpenChartId(null);setOpenChartName('Untitled Chart');setOpenChartData(null);setScreen('app');};
+  const handleBack=()=>{setScreen('dashboard');setOpenChartId(null);setOpenChartData(null);};
+
+  // Auth loading spinner
+  const spinner=(
+    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'#f4efe6'}}>
+      <div style={{width:36,height:36,borderRadius:'50%',border:'3px solid #d4cfc4',borderTopColor:'#7a8c72',animation:'spin 0.8s linear infinite'}}/>
+    </div>
+  );
+
+  // Step 1: Show landing page before anything else
+  if(!landed) return <LandingPage onGetStarted={()=>setLanded(true)}/>;
+
+  // Step 2: Wait for auth state to resolve
+  if(session===undefined) return spinner;
+
+  // Step 3: Not logged in → show login
+  if(!session) return <LoginScreen/>;
+
+  // Step 4: Loading a chart
+  if(loadingChart) return(
+    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'#f4efe6'}}>
+      <div style={{textAlign:'center'}}>
+        <div style={{width:36,height:36,borderRadius:'50%',border:'3px solid #d4cfc4',borderTopColor:'#7a8c72',animation:'spin 0.8s linear infinite',margin:'0 auto 16px'}}/>
+        <div style={{color:'#8fa086',fontSize:13,fontStyle:'italic'}}>Loading chart…</div>
+      </div>
+    </div>
+  );
+
+  // Step 5: In editor
+  if(screen==='app') return <App session={session} chartId={openChartId} chartName={openChartName} initialData={openChartData} onBack={handleBack}/>;
+
+  // Step 6: Dashboard
+  return <Dashboard session={session} onOpenChart={handleOpenChart} onNewChart={handleNewChart}/>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Root/>);
 </script>
 </body>
 </html>
