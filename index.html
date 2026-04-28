@@ -36,7 +36,7 @@ const SUPA_URL='https://bjjndbiwzwfqxoheaavv.supabase.co';
 const SUPA_KEY='sb_publishable_YR8W2NIYaPz6VFzonn6QMQ_TrgBq7ad';
 const supabase=window.supabase.createClient(SUPA_URL,SUPA_KEY);
 
-/* ── Constants ───────────────────────────────────────────────────────────────── */
+/* ── Constants ──────────────────────────────────────────────────────────── */
 const SEAT_R=20,ORBIT_R=80,TABLE_R=44,SVG_PAD=14;
 const CIRCLE_SVG=(ORBIT_R+SEAT_R+SVG_PAD)*2;
 const CCX=CIRCLE_SVG/2,CCY=CIRCLE_SVG/2;
@@ -45,7 +45,7 @@ let _tid=1,_gid=1;
 const tuid=()=>_tid++;
 const guid=()=>`g${_gid++}`;
 
-/* ── Palette ────────────────────────────────────────────────────────────────────── */
+/* ── Palette ─────────────────────────────────────────────────────────────── */
 const P={
   cream:'#f4efe6',parchment:'#ebe5db',
   gold:'#7a8c72',brown:'#3d4a38',brownMid:'#6b7c62',brownLight:'#8fa086',
@@ -55,6 +55,1150 @@ const P={
   familyFill:'#b8ccb2',familyStroke:'#4a5e45',
   hover:'#dde8d8',hoverStroke:'#4a5e45',border:'#d4cfc4',
 };
+
+/* ── Layout helpers ──────────────────────────────────────────────────────── */
+function getRectLayout(cap,sc){
+  sc=sc||1;
+  const sr=SEAT_R*sc,step=sr*2+8*sc,perSide=Math.ceil(cap/2),rest=cap-perSide;
+  const tableW=(perSide-1)*step+sr*2+step*0.4,tableH=52*sc;
+  const seatY=tableH/2+sr+7*sc;
+  const svgW=tableW+sr*2+16*sc,svgH=(seatY+sr+12*sc)*2;
+  const cx=svgW/2,cy=svgH/2;
+  const pos=[];
+  for(let i=0;i<perSide;i++)pos.push({x:-(perSide-1)*step/2+i*step,y:-seatY});
+  for(let i=0;i<rest;i++)pos.push({x:(rest-1)*step/2-i*step,y:seatY});
+  return{svgW,svgH,cx,cy,tableW,tableH,seatR:sr,positions:pos};
+}
+function circleSeats(cap,sc){
+  sc=sc||1;const orb=ORBIT_R*sc;
+  return Array.from({length:cap},(_,i)=>{const a=(i/cap)*2*Math.PI-Math.PI/2;return{x:orb*Math.cos(a),y:orb*Math.sin(a)};});
+}
+function svgLabel(name){const m=name.match(/^Table\s+(.+)$/i);if(m)return'T'+m[1];return name.length>7?name.substring(0,6)+'…':name;}
+
+/* ── Canvas rounded rect ─────────────────────────────────────────────────── */
+function cRoundRect(ctx,x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();
+}
+
+/* ── CSV parser ──────────────────────────────────────────────────────────── */
+function splitCSV(line){const out=[];let cur='',inQ=false;for(const ch of line){if(ch==='"')inQ=!inQ;else if(ch===','&&!inQ){out.push(cur.trim().replace(/^"|"$/g,''));cur='';}else cur+=ch;}out.push(cur.trim().replace(/^"|"$/g,''));return out;}
+const HWORDS=['first','last','name','guest','attendee','party','size','count','#','number','person'];
+function isHeader(f){let h=0;for(const x of f)if(HWORDS.some(w=>x.toLowerCase().includes(w)))h++;return h>=1&&isNaN(f[0]);}
+function parseGuestText(text){
+  const rows=text.split('\n').map(l=>l.trim()).filter(Boolean).map(splitCSV);
+  if(!rows.length)return[];
+  let start=0,fc=-1,lc=-1,nc=-1,cc=-1;
+  if(isHeader(rows[0])){start=1;rows[0].forEach((h,i)=>{const lh=h.toLowerCase();if(/first|fname/.test(lh))fc=i;else if(/last|lname|surname/.test(lh))lc=i;else if(/^name$|full.?name|guest|attendee|person/.test(lh))nc=i;if(/party|size|count|num|#|pax/.test(lh))cc=i;});}
+  return rows.slice(start).filter(r=>r.some(c=>c)).map(row=>{
+    let name='',count=1;
+    if(fc>=0||lc>=0)name=[(fc>=0?row[fc]:''),(lc>=0?row[lc]:'')].map(s=>(s||'').trim()).filter(Boolean).join(' ');
+    else if(nc>=0)name=(row[nc]||'').trim();
+    else if(row.length===1)name=row[0];
+    else{const c0=(row[0]||'').trim(),c1=(row[1]||'').trim(),n1=parseInt(c1);if(c1&&!isNaN(n1)&&n1>0&&n1<=50){name=c0;count=n1;}else if(c0&&c1&&isNaN(c0)&&isNaN(c1))name=`${c0} ${c1}`;else name=c0;}
+    if(cc>=0&&row[cc]){const n=parseInt(row[cc]);if(!isNaN(n)&&n>0)count=n;}
+    const mp=name.match(/^(.+?)\s*\((\d+)\)\s*$/);if(mp){name=mp[1].trim();count=+mp[2];}
+    name=name.replace(/['"]/g,'').trim();
+    return name?{id:guid(),name,count:Math.min(count,20)}:null;
+  }).filter(Boolean);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LOGIN SCREEN
+══════════════════════════════════════════════════════════════════════════ */
+function LoginScreen(){
+  const[mode,setMode]=useState('login'); // 'login' | 'signup'
+  const[email,setEmail]=useState('');
+  const[password,setPassword]=useState('');
+  const[loading,setLoading]=useState(false);
+  const[error,setError]=useState('');
+  const[message,setMessage]=useState('');
+
+  const handleGoogle=async()=>{
+    setLoading(true);setError('');
+    localStorage.setItem('es_oauth_pending','1');
+    const{error}=await supabase.auth.signInWithOAuth({
+      provider:'google',
+      options:{redirectTo:window.location.origin}
+    });
+    if(error){localStorage.removeItem('es_oauth_pending');setError(error.message);}
+    setLoading(false);
+  };
+
+  const handleEmail=async e=>{
+    e.preventDefault();setLoading(true);setError('');setMessage('');
+    if(mode==='login'){
+      const{error}=await supabase.auth.signInWithPassword({email,password});
+      if(error)setError(error.message);
+    } else {
+      const{error}=await supabase.auth.signUp({email,password});
+      if(error)setError(error.message);
+      else setMessage('Check your email to confirm your account!');
+    }
+    setLoading(false);
+  };
+
+  return(
+    <div style={{minHeight:'100vh',background:'radial-gradient(ellipse at 50% 40%, #edf4ea 0%, #f4efe6 65%)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:24}}>
+      <div style={{position:'absolute',width:500,height:500,borderRadius:'50%',border:'1px solid rgba(122,140,114,.12)',pointerEvents:'none'}}/>
+      <div style={{position:'absolute',width:380,height:380,borderRadius:'50%',border:'1px solid rgba(122,140,114,.1)',pointerEvents:'none'}}/>
+
+      <div className="wizard-card" style={{background:P.cream,borderRadius:20,padding:'40px 40px 36px',width:400,boxShadow:'0 24px 60px rgba(0,0,0,.12)',border:`1px solid ${P.border}`,textAlign:'center',zIndex:1}}>
+
+        {/* Logo */}
+        <svg width="60" height="46" viewBox="0 0 80 60" style={{marginBottom:14}}>
+          <circle cx="40" cy="30" r="10" fill="none" stroke="#7a8c72" strokeWidth="1.5"/>
+          {[0,60,120,180,240,300].map(a=>{const r=a*Math.PI/180,x1=40+12*Math.cos(r),y1=30+12*Math.sin(r),x2=40+24*Math.cos(r),y2=30+24*Math.sin(r);return<g key={a}><line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#7a8c72" strokeWidth="1"/><circle cx={x2} cy={y2} r="3.5" fill="#a8bc9e"/></g>;})}
+          <circle cx="40" cy="30" r="5" fill="#7a8c72"/>
+        </svg>
+        <div style={{fontSize:28,letterSpacing:'.2em',textTransform:'uppercase',color:P.brown,marginBottom:4}}>EasySeat</div>
+        <div style={{width:50,height:1.5,background:P.gold,margin:'0 auto 28px'}}/>
+
+        {/* Google button */}
+        <button onClick={handleGoogle} disabled={loading} style={{
+          width:'100%',padding:'12px',borderRadius:10,border:`1.5px solid ${P.border}`,
+          background:P.cream,cursor:'pointer',fontSize:13,color:P.brown,
+          display:'flex',alignItems:'center',justifyContent:'center',gap:10,
+          marginBottom:16,fontFamily:'Georgia,serif',transition:'background .15s',
+          opacity:loading?.6:1,
+        }}
+        onMouseEnter={e=>e.currentTarget.style.background=P.parchment}
+        onMouseLeave={e=>e.currentTarget.style.background=P.cream}>
+          <svg width="18" height="18" viewBox="0 0 18 18">
+            <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
+            <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
+            <path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>
+            <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
+          </svg>
+          Continue with Google
+        </button>
+
+        {/* Divider */}
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
+          <div style={{flex:1,height:1,background:P.border}}/>
+          <span style={{fontSize:11,color:P.brownLight,letterSpacing:'.08em'}}>OR</span>
+          <div style={{flex:1,height:1,background:P.border}}/>
+        </div>
+
+        {/* Email/password form */}
+        <form onSubmit={handleEmail}>
+          <input type="email" placeholder="Email address" value={email} onChange={e=>setEmail(e.target.value)} required
+            style={{width:'100%',padding:'10px 12px',borderRadius:8,border:`1.5px solid ${P.border}`,fontSize:13,background:P.cream,color:P.brown,outline:'none',marginBottom:10,fontFamily:'Georgia,serif'}}/>
+          <input type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} required
+            style={{width:'100%',padding:'10px 12px',borderRadius:8,border:`1.5px solid ${P.border}`,fontSize:13,background:P.cream,color:P.brown,outline:'none',marginBottom:16,fontFamily:'Georgia,serif'}}/>
+
+          {error&&<div style={{fontSize:12,color:'#e53e3e',marginBottom:12,textAlign:'left'}}>{error}</div>}
+          {message&&<div style={{fontSize:12,color:'#4a5e45',marginBottom:12,textAlign:'left'}}>{message}</div>}
+
+          <button type="submit" disabled={loading} style={{
+            width:'100%',padding:'12px',borderRadius:10,border:'none',
+            background:'#3d4a38',color:'#f4efe6',cursor:'pointer',fontSize:12,
+            letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'Georgia,serif',
+            fontWeight:700,opacity:loading?.6:1,
+          }}>
+            {loading?'…':mode==='login'?'Sign In':'Create Account'}
+          </button>
+        </form>
+
+        <button onClick={()=>{setMode(m=>m==='login'?'signup':'login');setError('');setMessage('');}}
+          style={{marginTop:16,background:'none',border:'none',cursor:'pointer',color:P.brownMid,fontSize:12,fontFamily:'Georgia,serif'}}>
+          {mode==='login'?'No account? Sign up →':'Have an account? Sign in →'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DASHBOARD
+══════════════════════════════════════════════════════════════════════════ */
+function Dashboard({session,onOpenChart,onNewChart}){
+  const[charts,setCharts]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[deleting,setDeleting]=useState(null);
+
+  useEffect(()=>{
+    loadCharts();
+  },[]);
+
+  const loadCharts=async()=>{
+    setLoading(true);
+    const{data,error}=await supabase.from('charts').select('id,name,created_at,updated_at').order('updated_at',{ascending:false});
+    if(!error)setCharts(data||[]);
+    setLoading(false);
+  };
+
+  const deleteChart=async(id,e)=>{
+    e.stopPropagation();
+    if(!confirm('Delete this chart? This cannot be undone.'))return;
+    setDeleting(id);
+    await supabase.from('charts').delete().eq('id',id);
+    setCharts(p=>p.filter(c=>c.id!==id));
+    setDeleting(null);
+  };
+
+  const signOut=async()=>{await supabase.auth.signOut();};
+
+  const fmt=d=>new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+
+  return(
+    <div style={{minHeight:'100vh',background:'radial-gradient(ellipse at 50% 30%, #edf4ea 0%, #f4efe6 70%)'}}>
+      {/* Header */}
+      <header style={{background:'linear-gradient(135deg,#3d4a38 0%,#4e5e48 100%)',padding:'16px 32px',display:'flex',alignItems:'center',justifyContent:'space-between',boxShadow:'0 4px 20px rgba(0,0,0,.2)'}}>
+        <div style={{fontSize:20,color:'#f4efe6',letterSpacing:'.22em',textTransform:'uppercase',fontWeight:700}}>EasySeat</div>
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,background:'rgba(255,255,255,.1)',borderRadius:20,padding:'6px 14px 6px 8px'}}>
+            <div style={{width:28,height:28,borderRadius:'50%',background:'#7a8c72',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:700,color:'#f4efe6'}}>
+              {(session.user.user_metadata?.full_name||session.user.email||'?')[0].toUpperCase()}
+            </div>
+            <span style={{fontSize:12,color:'#f4efe6',letterSpacing:'.04em'}}>
+              {session.user.user_metadata?.full_name||session.user.email}
+            </span>
+          </div>
+          <button onClick={signOut} style={{padding:'7px 16px',borderRadius:6,border:'1px solid rgba(255,255,255,.2)',background:'transparent',color:'rgba(244,239,230,.8)',cursor:'pointer',fontSize:11,letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'Georgia,serif'}}>Sign Out</button>
+        </div>
+      </header>
+
+      <div style={{maxWidth:900,margin:'0 auto',padding:'48px 24px'}}>
+        {/* Title + new button */}
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:36}}>
+          <div>
+            <div style={{fontSize:26,letterSpacing:'.1em',textTransform:'uppercase',color:P.brown}}>My Charts</div>
+            <div style={{fontSize:13,color:P.brownLight,marginTop:4,fontStyle:'italic'}}>Your saved seating charts</div>
+          </div>
+          <button onClick={onNewChart} style={{
+            padding:'12px 28px',borderRadius:10,border:'none',background:'#3d4a38',
+            color:'#f4efe6',cursor:'pointer',fontSize:12,letterSpacing:'.12em',
+            textTransform:'uppercase',fontFamily:'Georgia,serif',fontWeight:700,
+            boxShadow:'0 4px 16px rgba(61,74,56,.3)',
+          }}>+ New Chart</button>
+        </div>
+
+        {loading&&(
+          <div style={{textAlign:'center',padding:60,color:P.brownLight,fontSize:14,fontStyle:'italic'}}>Loading your charts…</div>
+        )}
+
+        {!loading&&charts.length===0&&(
+          <div className="empty-state" style={{textAlign:'center',padding:80,background:P.cream,borderRadius:16,border:`1px solid ${P.border}`}}>
+            <div style={{fontSize:48,marginBottom:16}}>🪑</div>
+            <div style={{fontSize:18,color:P.brown,marginBottom:8}}>No charts yet</div>
+            <div style={{fontSize:13,color:P.brownLight,marginBottom:28,fontStyle:'italic'}}>Create your first seating chart to get started</div>
+            <button onClick={onNewChart} style={{padding:'13px 36px',borderRadius:10,border:'none',background:'#3d4a38',color:'#f4efe6',cursor:'pointer',fontSize:12,letterSpacing:'.15em',textTransform:'uppercase',fontFamily:'Georgia,serif',fontWeight:700,boxShadow:'0 4px 16px rgba(61,74,56,.3)'}}>+ New Chart</button>
+          </div>
+        )}
+
+        {!loading&&charts.length>0&&(
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))',gap:20}}>
+            {charts.map(chart=>(
+              <div key={chart.id} onClick={()=>onOpenChart(chart.id,chart.name)}
+                style={{background:P.cream,borderRadius:14,border:`1px solid ${P.border}`,padding:'24px 22px',cursor:'pointer',transition:'all .15s',boxShadow:'0 2px 12px rgba(61,74,56,.07)',position:'relative'}}
+                onMouseEnter={e=>{e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='0 8px 24px rgba(61,74,56,.14)';}}
+                onMouseLeave={e=>{e.currentTarget.style.transform='';e.currentTarget.style.boxShadow='0 2px 12px rgba(61,74,56,.07)';}}>
+                <div style={{fontSize:40,marginBottom:14}}>🪑</div>
+                <div style={{fontSize:15,fontWeight:700,color:P.brown,marginBottom:6,letterSpacing:'.04em'}}>{chart.name}</div>
+                <div style={{fontSize:11,color:P.brownLight}}>Updated {fmt(chart.updated_at)}</div>
+                <div style={{fontSize:11,color:P.brownLight}}>Created {fmt(chart.created_at)}</div>
+                <button onClick={e=>deleteChart(chart.id,e)} disabled={deleting===chart.id}
+                  style={{position:'absolute',top:12,right:12,background:'none',border:'none',cursor:'pointer',color:'#c4857a',fontSize:16,opacity:.6}}
+                  onMouseEnter={e=>e.currentTarget.style.opacity=1}
+                  onMouseLeave={e=>e.currentTarget.style.opacity=.6}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ADD TABLE MODAL
+══════════════════════════════════════════════════════════════════════════ */
+function AddTableModal({onAdd,onClose}){
+  const[count,setCount]=useState(1);
+  const[capacity,setCapacity]=useState(8);
+  const[shape,setShape]=useState('circle');
+  const sb=active=>({flex:1,padding:'14px 8px',borderRadius:10,border:`2px solid ${active?'#3d4a38':P.border}`,cursor:'pointer',background:active?'#edf4ea':P.cream,display:'flex',flexDirection:'column',alignItems:'center',gap:6,transition:'all .15s'});
+  return(
+    <div style={{position:'fixed',inset:0,zIndex:2000,background:'rgba(61,74,56,.45)',display:'flex',alignItems:'center',justifyContent:'center'}} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div className="wizard-card" style={{background:P.cream,borderRadius:18,padding:'32px 32px 28px',width:440,boxShadow:'0 24px 60px rgba(0,0,0,.22)',border:`1px solid ${P.border}`}}>
+        <div style={{fontSize:20,letterSpacing:'.12em',textTransform:'uppercase',color:P.brown,marginBottom:4}}>Add Tables</div>
+        <div style={{fontSize:12,color:P.brownLight,fontStyle:'italic',marginBottom:24}}>Configure and add tables to your seating chart</div>
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:10,letterSpacing:'.12em',textTransform:'uppercase',color:P.brownMid,fontWeight:700,marginBottom:10}}>Table Shape</div>
+          <div style={{display:'flex',gap:12}}>
+            <button style={sb(shape==='circle')} onClick={()=>setShape('circle')}>
+              <svg width="54" height="54"><circle cx="27" cy="27" r="22" fill={shape==='circle'?'#d4e8d0':'#ece8de'} stroke={shape==='circle'?'#4a5e45':'#7a8c72'} strokeWidth="2"/>{[0,1,2,3,4,5,6,7].map(i=>{const a=i/8*2*Math.PI-Math.PI/2;return<circle key={i} cx={27+19*Math.cos(a)} cy={27+19*Math.sin(a)} r="4" fill={shape==='circle'?'#4a5e45':'#8fa086'}/>})}</svg>
+              <span style={{fontSize:11,color:shape==='circle'?P.brown:P.brownLight,fontWeight:shape==='circle'?700:400}}>Round</span>
+            </button>
+            <button style={sb(shape==='rect')} onClick={()=>setShape('rect')}>
+              <svg width="80" height="44"><rect x="5" y="14" width="70" height="16" rx="3" fill={shape==='rect'?'#d4e8d0':'#ece8de'} stroke={shape==='rect'?'#4a5e45':'#7a8c72'} strokeWidth="2"/>{[14,30,46,62].map(x=><circle key={`t${x}`} cx={x} cy="7" r="4.5" fill={shape==='rect'?'#4a5e45':'#8fa086'}/>)}{[14,30,46,62].map(x=><circle key={`b${x}`} cx={x} cy="37" r="4.5" fill={shape==='rect'?'#4a5e45':'#8fa086'}/>)}</svg>
+              <span style={{fontSize:11,color:shape==='rect'?P.brown:P.brownLight,fontWeight:shape==='rect'?700:400}}>Rectangular</span>
+            </button>
+          </div>
+        </div>
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:10,letterSpacing:'.12em',textTransform:'uppercase',color:P.brownMid,fontWeight:700,marginBottom:10}}>Seats Per Table</div>
+          <div style={{display:'flex',alignItems:'center',gap:12}}>
+            <input type="range" min="1" max="20" value={capacity} onChange={e=>setCapacity(+e.target.value)} style={{flex:1,accentColor:'#3d4a38',cursor:'pointer'}}/>
+            <div style={{minWidth:32,textAlign:'center',fontSize:22,fontWeight:700,color:P.brown}}>{capacity}</div>
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:10,color:P.brownLight,marginTop:4}}><span>1</span><span>20</span></div>
+        </div>
+        <div style={{marginBottom:28}}>
+          <div style={{fontSize:10,letterSpacing:'.12em',textTransform:'uppercase',color:P.brownMid,fontWeight:700,marginBottom:10}}>How Many Tables?</div>
+          <div style={{display:'flex',alignItems:'center',gap:14}}>
+            <button onClick={()=>setCount(c=>Math.max(1,c-1))} style={{width:36,height:36,borderRadius:'50%',border:`1.5px solid ${P.border}`,background:P.parchment,cursor:'pointer',fontSize:18,color:P.brown,display:'flex',alignItems:'center',justifyContent:'center'}}>−</button>
+            <div style={{fontSize:32,fontWeight:700,color:P.brown,minWidth:40,textAlign:'center'}}>{count}</div>
+            <button onClick={()=>setCount(c=>Math.min(30,c+1))} style={{width:36,height:36,borderRadius:'50%',border:`1.5px solid ${P.border}`,background:P.parchment,cursor:'pointer',fontSize:18,color:P.brown,display:'flex',alignItems:'center',justifyContent:'center'}}>+</button>
+            <div style={{fontSize:12,color:P.brownLight,fontStyle:'italic'}}>= {count*capacity} total seats</div>
+          </div>
+        </div>
+        <div style={{display:'flex',gap:10}}>
+          <button onClick={onClose} style={{flex:1,padding:'11px',borderRadius:8,border:`1.5px solid ${P.border}`,background:'transparent',cursor:'pointer',fontSize:12,letterSpacing:'.08em',textTransform:'uppercase',color:P.brownMid,fontFamily:'Georgia,serif'}}>Cancel</button>
+          <button onClick={()=>onAdd(count,capacity,shape)} style={{flex:2,padding:'11px',borderRadius:8,border:'none',background:'#3d4a38',cursor:'pointer',fontSize:12,letterSpacing:'.1em',textTransform:'uppercase',color:'#f4efe6',fontFamily:'Georgia,serif',fontWeight:700,boxShadow:'0 3px 12px rgba(61,74,56,.3)'}}>Add {count} {count===1?'Table':'Tables'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SETUP WIZARD
+══════════════════════════════════════════════════════════════════════════ */
+function SetupWizard({onAddTables,onSkip}){
+  const[step,setStep]=useState(0);
+  const[showModal,setShowModal]=useState(false);
+  if(showModal)return<AddTableModal onAdd={(c,cap,sh)=>{onAddTables(c,cap,sh);setShowModal(false);}} onClose={()=>setShowModal(false)}/>;
+  return(
+    <div className="empty-state" style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:24,background:'radial-gradient(ellipse at 50% 40%, #edf4ea 0%, #f4efe6 65%)'}}>
+      <div style={{position:'absolute',width:500,height:500,borderRadius:'50%',border:'1px solid rgba(122,140,114,.12)',pointerEvents:'none'}}/>
+      <div style={{position:'absolute',width:380,height:380,borderRadius:'50%',border:'1px solid rgba(122,140,114,.1)',pointerEvents:'none'}}/>
+      {step===0&&(
+        <div className="wizard-card" style={{textAlign:'center',maxWidth:480,zIndex:1}}>
+          <svg width="80" height="60" viewBox="0 0 80 60" style={{marginBottom:16}}>
+            <circle cx="40" cy="30" r="10" fill="none" stroke="#7a8c72" strokeWidth="1.5"/>
+            {[0,60,120,180,240,300].map(a=>{const r=a*Math.PI/180,x1=40+12*Math.cos(r),y1=30+12*Math.sin(r),x2=40+24*Math.cos(r),y2=30+24*Math.sin(r);return<g key={a}><line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#7a8c72" strokeWidth="1"/><circle cx={x2} cy={y2} r="3.5" fill="#a8bc9e"/></g>;})}
+            <circle cx="40" cy="30" r="5" fill="#7a8c72"/>
+          </svg>
+          <div style={{fontSize:30,letterSpacing:'.14em',textTransform:'uppercase',color:P.brown,marginBottom:6}}>EasySeat</div>
+          <div style={{width:60,height:1.5,background:P.gold,margin:'0 auto 28px'}}/>
+          <div style={{fontSize:14,color:P.brownMid,lineHeight:1.8,marginBottom:32}}>Let's build your seating chart together.<br/>We'll start by setting up your tables,<br/>then add your guest list.</div>
+          <button onClick={()=>setStep(1)} style={{padding:'14px 40px',borderRadius:10,border:'none',background:'#3d4a38',color:'#f4efe6',cursor:'pointer',fontSize:12,letterSpacing:'.15em',textTransform:'uppercase',fontFamily:'Georgia,serif',fontWeight:700,boxShadow:'0 4px 16px rgba(61,74,56,.3)'}}>Get Started →</button>
+        </div>
+      )}
+      {step===1&&(
+        <div className="wizard-card" style={{textAlign:'center',maxWidth:520,zIndex:1}}>
+          <div style={{fontSize:12,letterSpacing:'.2em',textTransform:'uppercase',color:P.brownMid,marginBottom:8}}>Step 1 of 2</div>
+          <div style={{fontSize:26,letterSpacing:'.1em',textTransform:'uppercase',color:P.brown,marginBottom:8}}>Set Up Tables</div>
+          <div style={{width:50,height:1.5,background:P.gold,margin:'0 auto 20px'}}/>
+          <div style={{fontSize:13,color:P.brownMid,lineHeight:1.8,marginBottom:32}}>How many tables do you need, and what shape are they?<br/>You can always add or remove tables later.</div>
+          <div style={{display:'flex',flexDirection:'column',gap:12,alignItems:'center'}}>
+            <button onClick={()=>setShowModal(true)} style={{padding:'14px 48px',borderRadius:10,border:'none',background:'#3d4a38',color:'#f4efe6',cursor:'pointer',fontSize:12,letterSpacing:'.15em',textTransform:'uppercase',fontFamily:'Georgia,serif',fontWeight:700,boxShadow:'0 4px 16px rgba(61,74,56,.3)',width:300}}>Configure Tables</button>
+            <button onClick={onSkip} style={{padding:'10px 48px',borderRadius:10,border:`1.5px solid ${P.border}`,background:'transparent',color:P.brownMid,cursor:'pointer',fontSize:11,letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'Georgia,serif',width:300}}>Start with Empty Canvas</button>
+          </div>
+          <button onClick={()=>setStep(0)} style={{marginTop:24,background:'none',border:'none',cursor:'pointer',color:P.brownLight,fontSize:12,fontFamily:'Georgia,serif'}}>← Back</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SHARED TABLE SVG RENDERER
+══════════════════════════════════════════════════════════════════════════ */
+function TableSVG({table,sc,overSeat,isBlockedAndOver,blockedMsg}){
+  sc=sc||1;
+  const isRect=table.shape==='rect';
+  const rl=isRect?getRectLayout(table.capacity,sc):null;
+  const seats=isRect?rl.positions:circleSeats(table.capacity,sc);
+  const svgW=isRect?rl.svgW:CIRCLE_SVG*sc,svgH=isRect?rl.svgH:CIRCLE_SVG*sc;
+  const cx=isRect?rl.cx:(CIRCLE_SVG*sc)/2,cy=isRect?rl.cy:(CIRCLE_SVG*sc)/2;
+  const sr=isRect?rl.seatR:SEAT_R*sc;
+  return(
+    <svg width={svgW} height={svgH} style={{display:'block',overflow:'visible'}}>
+      {isRect?<rect x={cx-rl.tableW/2} y={cy-rl.tableH/2} width={rl.tableW} height={rl.tableH} rx={5*sc} fill={isBlockedAndOver?'#ffdddd':P.tableFill} stroke={isBlockedAndOver?'#e53e3e':P.tableStroke} strokeWidth={2*sc}/>:<circle cx={cx} cy={cy} r={TABLE_R*sc} fill={isBlockedAndOver?'#ffdddd':P.tableFill} stroke={isBlockedAndOver?'#e53e3e':P.tableStroke} strokeWidth={2*sc}/>}
+      <text x={cx} y={cy-(5*sc)} textAnchor="middle" fill={isBlockedAndOver?'#c0392b':P.gold} fontSize={12*sc} fontFamily="Georgia,serif" fontWeight="700">{svgLabel(table.name)}</text>
+      <text x={cx} y={cy+(10*sc)} textAnchor="middle" fill={isBlockedAndOver?'#e53e3e':P.brownLight} fontSize={isBlockedAndOver?7.5*sc:9*sc} fontFamily="sans-serif" fontWeight={isBlockedAndOver?'700':'normal'}>{isBlockedAndOver?(blockedMsg||'TABLE FULL'):`#${table.id}`}</text>
+      {seats.map((sp,i)=>{
+        const en=table.guests[i],isG=en&&en.count>1;
+        const isOv=!isBlockedAndOver&&overSeat&&overSeat.tableId===table.id&&overSeat.seatIndex===i;
+        const sx=cx+sp.x,sy=cy+sp.y;
+        const fill=isBlockedAndOver?'#ffc5c5':isOv?P.hover:en?(isG?P.familyFill:P.seatFill):P.seatEmpty;
+        const stroke=isBlockedAndOver?'#e53e3e':isOv?P.hoverStroke:en?(isG?P.familyStroke:P.seatStroke):P.seatEmptyStroke;
+        return(
+          <g key={i}>
+            <circle cx={sx} cy={sy} r={sr} fill={fill} stroke={stroke} strokeWidth={isOv?2.5*sc:1.5*sc}/>
+            {en&&<text x={sx} y={sy+(isG?1:4)*sc} textAnchor="middle" fontSize={7.5*sc} fill={isBlockedAndOver?'#c0392b':isG?'#2d4a28':P.brown} fontFamily="sans-serif" style={{pointerEvents:'none',userSelect:'none'}}>{en.name.split(' ')[0].substring(0,7)}</text>}
+            {en&&isG&&<><circle cx={sx+13*sc} cy={sy-13*sc} r={8.5*sc} fill={isBlockedAndOver?'#e53e3e':P.familyStroke} stroke="white" strokeWidth={1.5*sc}/><text x={sx+13*sc} y={sy-9*sc} textAnchor="middle" fontSize={8.5*sc} fill="white" fontWeight="bold" style={{pointerEvents:'none',userSelect:'none'}}>{en.count}</text></>}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DRAG OVERLAY
+══════════════════════════════════════════════════════════════════════════ */
+function DragOverlay({drag}){
+  if(!drag)return null;
+  const{type,x,y}=drag;
+  const shared={position:'fixed',pointerEvents:'none',zIndex:99999,transform:'rotate(1.5deg) scale(1.04)',boxShadow:'0 12px 36px rgba(0,0,0,.28)',borderRadius:10};
+  if(type==='guest'){
+    const e=drag.entry;
+    return(<div style={{...shared,left:x-70,top:y-20,padding:'8px 14px',background:e.count>1?'#d4e8d0':P.cream,border:`1.5px solid ${e.count>1?'#5a7254':'#c4cfc4'}`,display:'flex',alignItems:'center',gap:7,fontSize:13,color:P.brown,whiteSpace:'nowrap'}}>
+      <span>{e.count>1?'👨‍👩‍👧':'🪑'}</span>
+      <span style={{fontWeight:e.count>1?600:400,color:e.count>1?'#2d4a28':P.brown}}>{e.name}</span>
+      {e.count>1&&<span style={{background:'#4a5e45',color:'#f4efe6',borderRadius:10,padding:'1px 7px',fontSize:10,fontWeight:700}}>×{e.count}</span>}
+    </div>);
+  }
+  if(type==='table'){
+    const t=drag.table;
+    const isRect=t.shape==='rect';
+    const rl=isRect?getRectLayout(t.capacity):null;
+    const w=isRect?rl.svgW:CIRCLE_SVG;
+    return(<div style={{...shared,left:x-drag.offsetX,top:y-drag.offsetY,background:P.cream,border:`2px solid ${P.gold}`,borderRadius:14,padding:'10px 10px 8px',display:'flex',flexDirection:'column',alignItems:'center',width:w+20}}>
+      <div style={{width:'100%',display:'flex',alignItems:'center',gap:4,marginBottom:5}}>
+        <span style={{color:P.brownLight,fontSize:14,marginRight:2}}>⠿</span>
+        <span style={{flex:1,fontSize:11,letterSpacing:'.1em',textTransform:'uppercase',color:P.brownMid,fontWeight:700}}>{t.name}</span>
+        <span style={{fontSize:11,color:P.brownLight,fontStyle:'italic'}}>{t.guests.filter(Boolean).length}/{t.capacity}</span>
+      </div>
+      <TableSVG table={t} sc={1}/>
+    </div>);
+  }
+  return null;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   TABLE CARD
+══════════════════════════════════════════════════════════════════════════ */
+function TableCard({table,overSeat,drag,isDropTarget,onSeatMouseDown,onUnassign,onRemove,onHandleMouseDown,onRename,isBlockedAndOver,blockedMsg}){
+  const isRect=table.shape==='rect';
+  const rl=isRect?getRectLayout(table.capacity):null;
+  const seats=isRect?rl.positions:circleSeats(table.capacity);
+  const svgW=isRect?rl.svgW:CIRCLE_SVG,svgH=isRect?rl.svgH:CIRCLE_SVG;
+  const cx=isRect?rl.cx:CCX,cy=isRect?rl.cy:CCY,sr=isRect?rl.seatR:SEAT_R;
+  const filled=table.guests.filter(Boolean).length;
+  const[editing,setEditing]=useState(false);
+  const[editVal,setEditVal]=useState(table.name);
+  const cardRef=useRef(null);
+  const isDimmed=drag&&drag.type==='table'&&drag.tableId===table.id;
+  useEffect(()=>{if(!editing)setEditVal(table.name);},[table.name,editing]);
+  const submitRename=()=>{setEditing(false);const v=editVal.trim();if(v)onRename(table.id,v);else setEditVal(table.name);};
+  return(
+    <div ref={cardRef} data-table-card-id={String(table.id)}
+      style={{background:isBlockedAndOver?'#fff0f0':P.cream,borderRadius:14,border:`2px solid ${isBlockedAndOver?'#e53e3e':isDropTarget?'#7a8c72':P.border}`,boxShadow:isBlockedAndOver?'0 0 0 4px rgba(229,62,62,.15),0 4px 18px rgba(229,62,62,.22)':isDropTarget?'0 0 0 4px rgba(122,140,114,.3),0 4px 18px rgba(61,74,56,.14)':'0 3px 16px rgba(61,74,56,.08)',padding:'12px 10px 10px',display:'flex',flexDirection:'column',alignItems:'center',transition:'box-shadow .15s,border-color .15s,background .15s',opacity:isDimmed?.3:1}}>
+      <div style={{width:'100%',display:'flex',alignItems:'center',gap:4,marginBottom:6}}>
+        <div onMouseDown={e=>{const r=cardRef.current.getBoundingClientRect();onHandleMouseDown(e,table.id,table.name,table,{offsetX:e.clientX-r.left,offsetY:e.clientY-r.top});}} title="Drag to reorder" style={{cursor:'grab',color:P.brownLight,fontSize:15,lineHeight:1,userSelect:'none',padding:'0 3px 0 0',flexShrink:0}}>⠿</div>
+        {editing?<input autoFocus value={editVal} onChange={e=>setEditVal(e.target.value)} onBlur={submitRename} onKeyDown={e=>{if(e.key==='Enter')submitRename();if(e.key==='Escape'){setEditing(false);setEditVal(table.name);}}} style={{flex:1,fontSize:11,letterSpacing:'.1em',textTransform:'uppercase',color:P.brownMid,fontWeight:700,background:'transparent',border:'none',borderBottom:`1.5px solid ${P.gold}`,outline:'none',fontFamily:'Georgia,serif',minWidth:0}}/>
+        :<span onClick={()=>{setEditing(true);setEditVal(table.name);}} title="Click to rename" style={{flex:1,fontSize:11,letterSpacing:'.1em',textTransform:'uppercase',color:P.brownMid,fontWeight:700,cursor:'text',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{table.name}</span>}
+        <span style={{fontSize:11,color:P.brownLight,fontStyle:'italic',flexShrink:0}}>{filled}/{table.capacity}</span>
+        <button onClick={()=>onRemove(table.id)} style={{background:'none',border:'none',cursor:'pointer',color:'#b07060',fontSize:16,lineHeight:1,padding:'0 0 0 3px',flexShrink:0}}>×</button>
+      </div>
+      <div style={{position:'relative'}}>
+        <TableSVG table={table} sc={1} overSeat={overSeat} isBlockedAndOver={isBlockedAndOver} blockedMsg={blockedMsg}/>
+        {seats.map((sp,i)=>{const en=table.guests[i];return(<div key={i} data-table-id={String(table.id)} data-seat-index={String(i)} onMouseDown={en?e=>{e.preventDefault();onSeatMouseDown(e,en,{tableId:table.id,seatIndex:i});}:undefined} onDoubleClick={en?()=>onUnassign(table.id,i):undefined} style={{position:'absolute',left:cx+sp.x-sr,top:cy+sp.y-sr,width:sr*2,height:sr*2,borderRadius:'50%',cursor:isBlockedAndOver?'not-allowed':en?'grab':'default',zIndex:10}}/>);})}
+      </div>
+    </div>
+  );
+}
+
+/* ── BgImage ─────────────────────────────────────────────────────────────── */
+function BgImage({dataUrl,w,h,x,y,onClear,onResize,onMove,zoom}){
+  const[hovered,setHovered]=useState(false);
+  const[resizing,setResizing]=useState(false);
+  const[moving,setMoving]=useState(false);
+  const startImgMove=e=>{
+    e.preventDefault();e.stopPropagation();setMoving(true);
+    const sx=e.clientX,sy=e.clientY,ox=x,oy=y;
+    const onMv=mv=>{const z=zoom||1;onMove(ox+(mv.clientX-sx)/z,oy+(mv.clientY-sy)/z);};
+    const onUp=()=>{setMoving(false);document.removeEventListener('mousemove',onMv);document.removeEventListener('mouseup',onUp);};
+    document.addEventListener('mousemove',onMv);document.addEventListener('mouseup',onUp);
+  };
+  const startImgResize=e=>{
+    e.preventDefault();e.stopPropagation();setResizing(true);
+    const sx=e.clientX,sw=w,aspect=w/h;
+    const onMv=mv=>{const dx=(mv.clientX-sx)/(zoom||1);const nw=Math.max(100,sw+dx);onResize(nw,nw/aspect);};
+    const onUp=()=>{setResizing(false);document.removeEventListener('mousemove',onMv);document.removeEventListener('mouseup',onUp);};
+    document.addEventListener('mousemove',onMv);document.addEventListener('mouseup',onUp);
+  };
+  return(
+    <div style={{position:'absolute',left:x,top:y,width:w,height:h,cursor:'move'}}
+      onMouseEnter={()=>setHovered(true)} onMouseLeave={()=>{if(!resizing&&!moving)setHovered(false);}}
+      onMouseDown={startImgMove}>
+      <img src={dataUrl} draggable={false} style={{display:'block',width:'100%',height:'100%',opacity:.55,userSelect:'none',borderRadius:4,pointerEvents:'none'}}/>
+      {(hovered||resizing||moving)&&<>
+        <div onMouseDown={e=>{e.stopPropagation();onClear();}} style={{position:'absolute',top:-10,right:-10,width:24,height:24,borderRadius:'50%',background:'#e53e3e',border:'2px solid white',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,color:'white',fontWeight:700,boxShadow:'0 2px 8px rgba(0,0,0,.35)',zIndex:50}}>×</div>
+        <div onMouseDown={startImgResize} title="Drag to resize" style={{position:'absolute',bottom:-10,right:-10,width:22,height:22,borderRadius:'50%',background:'#3d4a38',border:'2px solid white',cursor:'nwse-resize',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,color:'#a8bc9e',boxShadow:'0 2px 8px rgba(0,0,0,.35)',zIndex:50,userSelect:'none'}} onMouseEnter={e=>e.currentTarget.style.background='#6b7c62'} onMouseLeave={e=>e.currentTarget.style.background='#3d4a38'}>⤡</div>
+      </>}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   FLOORPLAN VIEW
+══════════════════════════════════════════════════════════════════════════ */
+function FloorplanView({tables,fpDataRef,floorplanBg,onSetBg,initialPositions,initialRotations}){
+  const outerRef=useRef(null);
+  const bgFileRef=useRef(null);
+  const[zoom,setZoom]=useState(1);
+  const[pan,setPan]=useState({x:60,y:60});
+  const[rotations,setRotations]=useState(initialRotations||{});
+  const[hoveredTable,setHoveredTable]=useState(null);
+  const[rotatingTable,setRotatingTable]=useState(null);
+  const zoomRef=useRef(1),panRef=useRef({x:60,y:60}),rotationsRef=useRef(initialRotations||{});
+
+  const[positions,setPositions]=useState(()=>{
+    if(initialPositions&&Object.keys(initialPositions).length>0)return initialPositions;
+    const cols=Math.ceil(Math.sqrt(Math.max(tables.length,1))),pos={};
+    tables.forEach((t,i)=>{const rl=t.shape==='rect'?getRectLayout(t.capacity,FP_SC):null;const w=rl?rl.svgW:CIRCLE_SVG*FP_SC,h=rl?rl.svgH:CIRCLE_SVG*FP_SC;pos[t.id]={x:(i%cols)*(w+40),y:Math.floor(i/cols)*(h+40)};});
+    return pos;
+  });
+
+  useEffect(()=>{
+    setPositions(prev=>{
+      const next={...prev};let changed=false;
+      tables.forEach((t,i)=>{
+        if(!next[t.id]){const cols=Math.ceil(Math.sqrt(Math.max(tables.length,1)));const rl=t.shape==='rect'?getRectLayout(t.capacity,FP_SC):null;const w=rl?rl.svgW:CIRCLE_SVG*FP_SC,h=rl?rl.svgH:CIRCLE_SVG*FP_SC;next[t.id]={x:(i%cols)*(w+40),y:Math.floor(i/cols)*(h+40)};changed=true;}
+      });
+      return changed?next:prev;
+    });
+  },[tables]);
+
+  useEffect(()=>{if(fpDataRef)fpDataRef.current={positions,rotations};},[positions,rotations]);
+
+  const dragRef=useRef(null);
+
+  const startTableDrag=useCallback((e,tableId)=>{
+    e.preventDefault();e.stopPropagation();document.body.classList.add('is-dragging');
+    const p=positions[tableId]||{x:0,y:0};
+    dragRef.current={kind:'table',tableId,startX:e.clientX,startY:e.clientY,origX:p.x,origY:p.y};
+  },[positions]);
+
+  const startPan=useCallback(e=>{
+    e.preventDefault();document.body.classList.add('is-dragging');
+    dragRef.current={kind:'pan',startX:e.clientX,startY:e.clientY,origPanX:panRef.current.x,origPanY:panRef.current.y};
+  },[]);
+
+  const startRotate=useCallback((e,tableId,svgW,svgH)=>{
+    e.preventDefault();e.stopPropagation();document.body.classList.add('is-rotating');setRotatingTable(tableId);
+    const pos=positions[tableId]||{x:0,y:0};const rect=outerRef.current.getBoundingClientRect();
+    const cx=rect.left+panRef.current.x+(pos.x+svgW/2)*zoomRef.current;
+    const cy=rect.top+panRef.current.y+(pos.y+svgH/2)*zoomRef.current;
+    dragRef.current={kind:'rotate',tableId,startAngle:Math.atan2(e.clientY-cy,e.clientX-cx),startRotation:rotationsRef.current[tableId]||0,cx,cy};
+  },[positions]);
+
+  useEffect(()=>{
+    const onMove=e=>{
+      if(!dragRef.current)return;
+      const d=dragRef.current;
+      if(d.kind==='table'){const z=zoomRef.current;setPositions(prev=>({...prev,[d.tableId]:{x:d.origX+(e.clientX-d.startX)/z,y:d.origY+(e.clientY-d.startY)/z}}));}
+      else if(d.kind==='pan'){const np={x:d.origPanX+(e.clientX-d.startX),y:d.origPanY+(e.clientY-d.startY)};panRef.current=np;setPan(np);}
+      else if(d.kind==='rotate'){
+        const cur=Math.atan2(e.clientY-d.cy,e.clientX-d.cx);
+        let nr=d.startRotation+(cur-d.startAngle)*180/Math.PI;
+        if(e.shiftKey)nr=Math.round(nr/15)*15;
+        rotationsRef.current={...rotationsRef.current,[d.tableId]:nr};
+        setRotations(prev=>({...prev,[d.tableId]:nr}));
+      }
+    };
+    const onUp=()=>{if(!dragRef.current)return;document.body.classList.remove('is-dragging');document.body.classList.remove('is-rotating');setRotatingTable(null);dragRef.current=null;};
+    document.addEventListener('mousemove',onMove);document.addEventListener('mouseup',onUp);
+    return()=>{document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);};
+  },[]);
+
+  useEffect(()=>{
+    const el=outerRef.current;if(!el)return;
+    const onWheel=e=>{
+      if(!(e.ctrlKey||e.metaKey))return;e.preventDefault();
+      const factor=e.deltaY>0?.91:1.10,rect=el.getBoundingClientRect();
+      const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+      setZoom(z=>{const nz=Math.min(3,Math.max(.12,z*factor));zoomRef.current=nz;const npx=mx-(mx-panRef.current.x)*nz/z,npy=my-(my-panRef.current.y)*nz/z;panRef.current={x:npx,y:npy};setPan({x:npx,y:npy});return nz;});
+    };
+    el.addEventListener('wheel',onWheel,{passive:false});
+    return()=>el.removeEventListener('wheel',onWheel);
+  },[]);
+
+  useEffect(()=>{
+    const el=outerRef.current;if(!el)return;
+    let lastDist=null;
+    const dist=ts=>Math.hypot(ts[1].clientX-ts[0].clientX,ts[1].clientY-ts[0].clientY);
+    const mid=ts=>({x:(ts[0].clientX+ts[1].clientX)/2,y:(ts[0].clientY+ts[1].clientY)/2});
+    const onTM=e=>{
+      if(e.touches.length===2){e.preventDefault();const dd=dist(e.touches),m=mid(e.touches);
+        if(lastDist!==null){const factor=dd/lastDist,rect=el.getBoundingClientRect(),mx=m.x-rect.left,my=m.y-rect.top;
+          setZoom(z=>{const nz=Math.min(3,Math.max(.12,z*factor));zoomRef.current=nz;const npx=mx-(mx-panRef.current.x)*nz/z,npy=my-(my-panRef.current.y)*nz/z;panRef.current={x:npx,y:npy};setPan({x:npx,y:npy});return nz;});}
+        lastDist=dd;}
+    };
+    const onTE=()=>{lastDist=null;};
+    el.addEventListener('touchmove',onTM,{passive:false});el.addEventListener('touchend',onTE);
+    return()=>{el.removeEventListener('touchmove',onTM);el.removeEventListener('touchend',onTE);};
+  },[]);
+
+  const resetView=()=>{setZoom(1);zoomRef.current=1;const np={x:60,y:60};panRef.current=np;setPan(np);};
+
+  const handleBgUpload=e=>{
+    const file=e.target.files[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const img=new Image();
+      img.onload=()=>{
+        const MAX=1400,scale=img.width>MAX?MAX/img.width:1;
+        onSetBg({dataUrl:ev.target.result,w:img.width*scale,h:img.height*scale,x:0,y:0});
+        const el=outerRef.current;if(!el)return;
+        const{width:vw,height:vh}=el.getBoundingClientRect();
+        const fitZoom=Math.min(vw/(img.width*scale+120),vh/(img.height*scale+120),1);
+        zoomRef.current=fitZoom;setZoom(fitZoom);
+        const np={x:40,y:40};panRef.current=np;setPan(np);
+      };
+      img.src=ev.target.result;
+    };
+    reader.readAsDataURL(file);e.target.value='';
+  };
+
+  return(
+    <div ref={outerRef} onMouseDown={startPan}
+      style={{flex:1,overflow:'hidden',position:'relative',background:'#f0ede6',backgroundImage:'radial-gradient(circle,#c8cfc0 1px,transparent 1px)',backgroundSize:'28px 28px',cursor:'grab'}}>
+      <div style={{position:'absolute',bottom:24,right:24,display:'flex',alignItems:'center',gap:8,zIndex:20,pointerEvents:'auto'}}>
+        <input ref={bgFileRef} type="file" accept="image/*" onChange={handleBgUpload} style={{display:'none'}}/>
+        <button onMouseDown={e=>e.stopPropagation()} onClick={()=>bgFileRef.current.click()}
+          style={{padding:'7px 14px',borderRadius:8,border:'1.5px dashed rgba(255,255,255,.4)',background:'rgba(61,74,56,.8)',color:'#e8f0e4',cursor:'pointer',fontSize:11,letterSpacing:'.08em',fontFamily:'Georgia,serif'}}>
+          ↑ Upload Room
+        </button>
+        {floorplanBg&&<button onMouseDown={e=>e.stopPropagation()} onClick={()=>onSetBg(null)}
+          style={{padding:'7px 12px',borderRadius:8,border:'1.5px solid rgba(255,255,255,.2)',background:'rgba(61,74,56,.8)',color:'#a8bc9e',cursor:'pointer',fontSize:11,fontFamily:'Georgia,serif'}}>✕ Clear Room</button>}
+        <div style={{background:'rgba(61,74,56,.78)',color:'#e8f0e4',borderRadius:8,padding:'6px 12px',fontSize:10.5,letterSpacing:'.08em',pointerEvents:'none'}}>
+          Drag canvas to pan &nbsp;·&nbsp; Pinch or Ctrl+scroll to zoom &nbsp;·&nbsp; Hover table → ↻ to rotate
+        </div>
+        <div style={{background:'rgba(61,74,56,.9)',borderRadius:10,display:'flex',alignItems:'center',gap:1,padding:'3px 4px',boxShadow:'0 2px 10px rgba(0,0,0,.2)'}}>
+          <button onMouseDown={e=>e.stopPropagation()} onClick={()=>setZoom(z=>{const nz=Math.max(.12,z-.1);zoomRef.current=nz;return nz;})} style={{width:30,height:30,borderRadius:7,border:'none',background:'transparent',color:'#e8f0e4',fontSize:18,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>−</button>
+          <span style={{color:'#c8dcc4',fontSize:11,minWidth:38,textAlign:'center'}}>{Math.round(zoom*100)}%</span>
+          <button onMouseDown={e=>e.stopPropagation()} onClick={()=>setZoom(z=>{const nz=Math.min(3,z+.1);zoomRef.current=nz;return nz;})} style={{width:30,height:30,borderRadius:7,border:'none',background:'transparent',color:'#e8f0e4',fontSize:18,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>+</button>
+          <button onMouseDown={e=>e.stopPropagation()} onClick={resetView} style={{width:36,height:30,borderRadius:7,border:'none',background:'transparent',color:'#a8bc9e',fontSize:10,cursor:'pointer',letterSpacing:'.03em'}}>Reset</button>
+        </div>
+      </div>
+      <div style={{position:'absolute',transformOrigin:'0 0',transform:`translate(${pan.x}px,${pan.y}px) scale(${zoom})`}}>
+        {floorplanBg&&<BgImage dataUrl={floorplanBg.dataUrl} w={floorplanBg.w} h={floorplanBg.h} x={floorplanBg.x||0} y={floorplanBg.y||0} onClear={()=>onSetBg(null)} onResize={(nw,nh)=>onSetBg({...floorplanBg,w:nw,h:nh})} onMove={(nx,ny)=>onSetBg({...floorplanBg,x:nx,y:ny})} zoom={zoom}/>}
+        {tables.map(table=>{
+          const isRect=table.shape==='rect';
+          const rl=isRect?getRectLayout(table.capacity,FP_SC):null;
+          const svgW=isRect?rl.svgW:CIRCLE_SVG*FP_SC,svgH=isRect?rl.svgH:CIRCLE_SVG*FP_SC;
+          const pos=positions[table.id]||{x:0,y:0};
+          const rot=rotations[table.id]||0;
+          const isDraggingThis=dragRef.current?.tableId===table.id;
+          return(
+            <div key={table.id} onMouseDown={e=>startTableDrag(e,table.id)}
+              onMouseEnter={()=>setHoveredTable(table.id)} onMouseLeave={()=>setHoveredTable(null)}
+              style={{position:'absolute',left:pos.x,top:pos.y,width:svgW,height:svgH,transform:`rotate(${rot}deg)`,transformOrigin:'50% 50%',cursor:'grab',userSelect:'none',zIndex:isDraggingThis?100:1}}>
+              <div style={{filter:'drop-shadow(0 4px 14px rgba(61,74,56,.2))'}}><TableSVG table={table} sc={FP_SC}/></div>
+              <div style={{textAlign:'center',fontSize:9,letterSpacing:'.12em',textTransform:'uppercase',color:P.brownMid,fontWeight:700,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:svgW}}>{table.name}</div>
+              {isRect&&(hoveredTable===table.id||rotatingTable===table.id)&&(
+                <div onMouseDown={e=>startRotate(e,table.id,svgW,svgH)} title="Drag to rotate · Shift=15° snap"
+                  style={{position:'absolute',top:-12,right:-12,width:22,height:22,borderRadius:'50%',background:'#3d4a38',border:'2.5px solid #f4efe6',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,color:'#a8bc9e',cursor:'crosshair',boxShadow:'0 2px 8px rgba(0,0,0,.35)',zIndex:20,userSelect:'none'}}
+                  onMouseEnter={e=>e.currentTarget.style.background='#6b7c62'}
+                  onMouseLeave={e=>e.currentTarget.style.background='#3d4a38'}>↻</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MAIN APP
+══════════════════════════════════════════════════════════════════════════ */
+function App({session,chartId:initChartId,chartName:initChartName,initialData,onBack}){
+  const[tables,setTables]=useState(initialData?.tables||[]);
+  const[tableOrder,setTableOrder]=useState(initialData?.tableOrder||[]);
+  const[unassigned,setUnassigned]=useState(initialData?.unassigned||[]);
+  const[drag,setDrag]=useState(null);
+  const[overSeat,setOverSeat]=useState(null);
+  const[dropTarget,setDropTarget]=useState(null);
+  const[overList,setOverList]=useState(false);
+  const[newName,setNewName]=useState('');
+  const[newCount,setNewCount]=useState(1);
+  const[floorplanBg,setFloorplanBg]=useState(initialData?.floorplanBg||null);
+  const[showWizard,setShowWizard]=useState(!initialData&&(initialData?.tables||[]).length===0);
+  const[showModal,setShowModal]=useState(false);
+  const[view,setView]=useState('tables');
+  const[editingGuestId,setEditingGuestId]=useState(null);
+  const[editGuestVal,setEditGuestVal]=useState('');
+  const[chartId,setChartId]=useState(initChartId||null);
+  const[chartName,setChartName]=useState(initChartName||'Untitled Chart');
+  const[editingChartName,setEditingChartName]=useState(false);
+  const[saving,setSaving]=useState(false);
+  const[saveMsg,setSaveMsg]=useState('');
+  const fileRef=useRef(null);
+  const dragRef=useRef(null);
+  const tablesRef=useRef(tables);
+  const unassignedRef=useRef(unassigned);
+  const fpDataRef=useRef({
+    positions:initialData?.fpPositions||{},
+    rotations:initialData?.fpRotations||{}
+  });
+  useEffect(()=>{tablesRef.current=tables;},[tables]);
+  useEffect(()=>{unassignedRef.current=unassigned;},[unassigned]);
+
+  // If loading a chart with tables, skip the wizard
+  useEffect(()=>{
+    if(tables.length>0)setShowWizard(false);
+  },[]);
+
+  /* ── Save ────────────────────────────────────────────────────────────── */
+  const saveChart=async()=>{
+    setSaving(true);setSaveMsg('');
+    const data={
+      tables,tableOrder,unassigned,floorplanBg,
+      fpPositions:fpDataRef.current.positions,
+      fpRotations:fpDataRef.current.rotations,
+    };
+    try{
+      if(chartId){
+        const{error}=await supabase.from('charts').update({name:chartName,data,updated_at:new Date().toISOString()}).eq('id',chartId);
+        if(error)throw error;
+      }else{
+        const{data:row,error}=await supabase.from('charts').insert({user_id:session.user.id,name:chartName,data}).select().single();
+        if(error)throw error;
+        setChartId(row.id);
+      }
+      setSaveMsg('Saved!');
+      setTimeout(()=>setSaveMsg(''),2500);
+    }catch(e){
+      setSaveMsg('Error saving');
+    }
+    setSaving(false);
+  };
+
+  /* ── Guest name editing ──────────────────────────────────────────────── */
+  const startEditGuest=(id,name)=>{setEditingGuestId(id);setEditGuestVal(name);};
+  const submitEditGuest=()=>{
+    const name=editGuestVal.trim();
+    if(name&&editingGuestId){
+      setUnassigned(p=>p.map(g=>g.id!==editingGuestId?g:{...g,name}));
+      setTables(p=>p.map(t=>({...t,guests:t.guests.map(g=>g&&g.id===editingGuestId?{...g,name}:g)})));
+    }
+    setEditingGuestId(null);setEditGuestVal('');
+  };
+
+  /* ── PDF Export ──────────────────────────────────────────────────────── */
+  const exportPDF=()=>{
+    const{jsPDF}=window.jspdf;
+    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const PW=210,PH=297,M=18,CW=PW-M*2;
+    const drawHeader=(title)=>{
+      doc.setFillColor(61,74,56);doc.rect(0,0,PW,22,'F');
+      doc.setTextColor(244,239,230);doc.setFont('helvetica','bold');doc.setFontSize(16);doc.text('EasySeat',M,14);
+      doc.setFontSize(9);doc.setFont('helvetica','normal');doc.text(title,PW-M,14,{align:'right'});
+    };
+    drawHeader('Seating Assignments');
+    let y=32;
+    const orderedTbls=tableOrder.map(id=>tables.find(t=>t.id===id)).filter(Boolean);
+    for(const table of orderedTbls){
+      const seen=new Set(),guests=[];
+      table.guests.forEach(g=>{if(g&&!seen.has(g.id)){seen.add(g.id);guests.push(g);}});
+      guests.sort((a,b)=>{const la=a.name.trim().split(/\s+/).pop().toLowerCase(),lb=b.name.trim().split(/\s+/).pop().toLowerCase();return la.localeCompare(lb);});
+      const rowH=guests.length===0?18:10+guests.length*5.8+6;
+      if(y+rowH>PH-16){doc.addPage();drawHeader('Seating Assignments (cont.)');y=32;}
+      doc.setFillColor(236,232,222);doc.roundedRect(M,y-5,CW,9,2,2,'F');
+      doc.setTextColor(61,74,56);doc.setFont('helvetica','bold');doc.setFontSize(11);doc.text(table.name,M+4,y+1);
+      const filled=table.guests.filter(Boolean).length;
+      doc.setFontSize(9);doc.setFont('helvetica','normal');doc.setTextColor(143,160,134);
+      doc.text(`${filled}/${table.capacity} seats`,PW-M-2,y+1,{align:'right'});
+      y+=8;
+      if(guests.length===0){doc.setFont('helvetica','italic');doc.setFontSize(9);doc.setTextColor(190,190,190);doc.text('No guests assigned',M+6,y);y+=6;}
+      else{doc.setFont('helvetica','normal');doc.setFontSize(10);doc.setTextColor(61,74,56);for(const g of guests){if(y>PH-16){doc.addPage();drawHeader('Seating Assignments (cont.)');y=32;}const label=g.count>1?`${g.name}  (party of ${g.count})`:g.name;doc.text(`  ${label}`,M+4,y);y+=5.8;}}
+      y+=5;
+    }
+    // Floorplan page
+    doc.addPage();drawHeader('Table Floorplan');
+    let{positions,rotations}=fpDataRef.current;
+    if(!positions||Object.keys(positions).length===0){
+      const cols=Math.ceil(Math.sqrt(Math.max(orderedTbls.length,1)));positions={};rotations={};
+      orderedTbls.forEach((t,i)=>{const rl=t.shape==='rect'?getRectLayout(t.capacity,FP_SC):null;const w=rl?rl.svgW:CIRCLE_SVG*FP_SC,h=rl?rl.svgH:CIRCLE_SVG*FP_SC;positions[t.id]={x:(i%cols)*(w+40),y:Math.floor(i/cols)*(h+40)};});
+    }
+    if(orderedTbls.length>0){
+      let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+      orderedTbls.forEach(t=>{const pos=positions[t.id];if(!pos)return;const rl=t.shape==='rect'?getRectLayout(t.capacity,FP_SC):null;const w=rl?rl.svgW:CIRCLE_SVG*FP_SC,h=rl?rl.svgH:CIRCLE_SVG*FP_SC;minX=Math.min(minX,pos.x);minY=Math.min(minY,pos.y);maxX=Math.max(maxX,pos.x+w);maxY=Math.max(maxY,pos.y+h);});
+      const PAD=50,contentW=maxX-minX+PAD*2,contentH=maxY-minY+PAD*2;
+      const PDF_W=CW*3.78,PDF_H=(PH-34)*3.78;
+      const ds=Math.min(PDF_W/contentW,PDF_H/contentH);
+      const canvas=document.createElement('canvas');
+      canvas.width=Math.ceil(contentW*ds);canvas.height=Math.ceil(contentH*ds);
+      const ctx=canvas.getContext('2d');
+      ctx.fillStyle='#f0ede6';ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle='#d0d7c8';
+      for(let gx=0;gx<canvas.width;gx+=28*ds)for(let gy=0;gy<canvas.height;gy+=28*ds){ctx.beginPath();ctx.arc(gx,gy,1.2,0,Math.PI*2);ctx.fill();}
+      orderedTbls.forEach(table=>{
+        const pos=positions[table.id];if(!pos)return;
+        const rot=((rotations[table.id]||0)*Math.PI)/180;
+        const rl=table.shape==='rect'?getRectLayout(table.capacity,FP_SC):null;
+        const w=rl?rl.svgW:CIRCLE_SVG*FP_SC,h=rl?rl.svgH:CIRCLE_SVG*FP_SC;
+        const tcx=(pos.x+w/2-minX+PAD)*ds,tcy=(pos.y+h/2-minY+PAD)*ds;
+        ctx.save();ctx.translate(tcx,tcy);ctx.rotate(rot);
+        ctx.fillStyle='#ece8de';ctx.strokeStyle='#7a8c72';ctx.lineWidth=1.8*ds;
+        if(table.shape==='rect'){const tw=rl.tableW*ds,th=rl.tableH*ds,rr=4*ds;cRoundRect(ctx,-tw/2,-th/2,tw,th,rr);ctx.fill();ctx.stroke();}
+        else{const tr=TABLE_R*FP_SC*ds;ctx.beginPath();ctx.arc(0,0,tr,0,Math.PI*2);ctx.fill();ctx.stroke();}
+        const seats=table.shape==='rect'?getRectLayout(table.capacity,FP_SC).positions:circleSeats(table.capacity,FP_SC);
+        const sr=(table.shape==='rect'?rl.seatR:SEAT_R*FP_SC)*ds;
+        seats.forEach((sp,i)=>{const en=table.guests[i];ctx.beginPath();ctx.arc(sp.x*ds,sp.y*ds,sr,0,Math.PI*2);ctx.fillStyle=en?'#cdd8c7':'#f0ece3';ctx.strokeStyle=en?'#6b7c62':'#c4cbbe';ctx.lineWidth=ds;ctx.fill();ctx.stroke();});
+        const fs=Math.max(10,11*ds);
+        ctx.fillStyle='#7a8c72';ctx.font=`bold ${fs}px Georgia,serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(svgLabel(table.name),0,0);
+        ctx.restore();
+      });
+      const imgData=canvas.toDataURL('image/png');
+      const imgH=CW*(canvas.height/canvas.width);
+      doc.addImage(imgData,'PNG',M,26,CW,Math.min(imgH,PH-34));
+    }
+    doc.save(`${chartName.replace(/[^a-z0-9]/gi,'-')}.pdf`);
+  };
+
+  /* ── Mouse drag system ───────────────────────────────────────────────── */
+  useEffect(()=>{
+    if(!drag||view!=='tables')return;
+    document.body.classList.add('is-dragging');
+    const onMove=e=>{
+      const x=e.clientX,y=e.clientY;dragRef.current={...dragRef.current,x,y};setDrag(prev=>prev?{...prev,x,y}:null);
+      const els=document.elementsFromPoint(x,y);
+      if(dragRef.current?.type==='guest'){
+        const sEl=els.find(el=>el.getAttribute&&el.getAttribute('data-table-id')&&el.getAttribute('data-seat-index')!==null);
+        if(sEl){const tid=+sEl.getAttribute('data-table-id'),si=+sEl.getAttribute('data-seat-index');setOverSeat(prev=>(prev&&prev.tableId===tid&&prev.seatIndex===si)?prev:{tableId:tid,seatIndex:si});}else setOverSeat(null);
+        setOverList(!!els.find(el=>el.getAttribute&&el.getAttribute('data-drop-zone')==='unassigned'));
+      }else if(dragRef.current?.type==='table'){
+        const cEl=els.find(el=>el.getAttribute&&el.getAttribute('data-table-card-id')&&+el.getAttribute('data-table-card-id')!==dragRef.current.tableId);
+        setDropTarget(cEl?+cEl.getAttribute('data-table-card-id'):null);
+      }
+    };
+    const onUp=e=>{
+      document.body.classList.remove('is-dragging');
+      const d=dragRef.current;if(!d){setDrag(null);return;}
+      const els=document.elementsFromPoint(e.clientX,e.clientY);
+      if(d.type==='guest'){
+        const sEl=els.find(el=>el.getAttribute&&el.getAttribute('data-table-id')&&el.getAttribute('data-seat-index')!==null);
+        const lEl=els.find(el=>el.getAttribute&&el.getAttribute('data-drop-zone')==='unassigned');
+        if(sEl)doGuestDrop(d,{tableId:+sEl.getAttribute('data-table-id'),seatIndex:+sEl.getAttribute('data-seat-index')});
+        else if(lEl)doGuestDrop(d,'unassigned');
+        setOverSeat(null);setOverList(false);
+      }else if(d.type==='table'){
+        const cEl=els.find(el=>el.getAttribute&&el.getAttribute('data-table-card-id')&&+el.getAttribute('data-table-card-id')!==d.tableId);
+        if(cEl)doTableDrop(d.tableId,+cEl.getAttribute('data-table-card-id'));
+        setDropTarget(null);
+      }
+      setDrag(null);dragRef.current=null;
+    };
+    document.addEventListener('mousemove',onMove);document.addEventListener('mouseup',onUp);
+    return()=>{document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);document.body.classList.remove('is-dragging');};
+  },[drag?.type,drag?.entry?.id,drag?.tableId,view]);
+
+  const doGuestDrop=(d,target)=>{
+    const{entry}=d,cur=tablesRef.current,ua=unassignedRef.current;
+    if(target!=='unassigned'){const dst=cur.find(t=>t.id===target.tableId);if(dst){const fo=d.source==='unassigned'||d.source.tableId!==target.tableId;if(fo&&dst.guests.filter(g=>!g).length<entry.count)return;}}
+    const ua2=ua.map(g=>({...g})),tbs=cur.map(t=>({...t,guests:[...t.guests]}));
+    if(d.source==='unassigned'){const i=ua2.findIndex(g=>g.id===entry.id);if(i>-1)ua2.splice(i,1);}
+    else{const s=tbs.find(t=>t.id===d.source.tableId);if(s)s.guests=s.guests.map(g=>g&&g.id===entry.id?null:g);}
+    if(target==='unassigned'){if(!ua2.find(g=>g.id===entry.id))ua2.push(entry);}
+    else{const dst=tbs.find(t=>t.id===target.tableId);if(dst){let r=entry.count;for(let i=0;i<dst.guests.length&&r>0;i++)if(!dst.guests[i]){dst.guests[i]=entry;r--;}}}
+    setUnassigned(ua2);setTables(tbs);
+  };
+  const doTableDrop=(fromId,toId)=>{setTableOrder(prev=>{const n=[...prev],fi=n.indexOf(fromId),ti=n.indexOf(toId);if(fi===-1||ti===-1)return prev;n.splice(fi,1);n.splice(ti,0,fromId);return n;});};
+
+  const startGuestDrag=(e,entry,source)=>{
+    e.preventDefault();
+    const sx=e.clientX,sy=e.clientY;
+    const pending={type:'guest',entry,source,x:sx,y:sy};
+    const onMove=mv=>{
+      if(Math.hypot(mv.clientX-sx,mv.clientY-sy)>5){cleanup();dragRef.current={...pending,x:mv.clientX,y:mv.clientY};setDrag({...pending,x:mv.clientX,y:mv.clientY});}
+    };
+    const onUp=()=>cleanup();
+    const cleanup=()=>{document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);};
+    document.addEventListener('mousemove',onMove);document.addEventListener('mouseup',onUp);
+  };
+  const startTableDrag=(e,tableId,tableName,table,offset)=>{e.preventDefault();const d={type:'table',tableId,tableName,table,offsetX:offset.offsetX,offsetY:offset.offsetY,x:e.clientX,y:e.clientY};dragRef.current=d;setDrag(d);};
+
+  /* ── Table/guest management ──────────────────────────────────────────── */
+  const addTables=(count,capacity,shape)=>{
+    const newTs=[],newIds=[];
+    for(let i=0;i<count;i++){const id=tuid();newTs.push({id,name:`Table ${id}`,capacity,shape,guests:Array(capacity).fill(null)});newIds.push(id);}
+    setTables(p=>[...p,...newTs]);setTableOrder(p=>[...p,...newIds]);setShowWizard(false);setShowModal(false);
+  };
+  const removeTable=id=>{
+    const t=tables.find(t=>t.id===id);
+    if(t){const seen=new Set(),ret=[];t.guests.forEach(g=>{if(g&&!seen.has(g.id)){seen.add(g.id);ret.push(g);}});setUnassigned(p=>[...p,...ret]);}
+    setTables(p=>p.filter(t=>t.id!==id));setTableOrder(p=>p.filter(x=>x!==id));
+  };
+  const renameTable=(id,name)=>setTables(p=>p.map(t=>t.id!==id?t:{...t,name}));
+  const addGuest=()=>{const name=newName.trim();if(!name)return;setUnassigned(p=>[...p,{id:guid(),name,count:newCount}]);setNewName('');setNewCount(1);};
+  const removeGuest=id=>{setUnassigned(p=>p.filter(g=>g.id!==id));setTables(p=>p.map(t=>({...t,guests:t.guests.map(g=>g&&g.id===id?null:g)})));};
+  const unassignFromSeat=(tableId,si)=>{const t=tables.find(t=>t.id===tableId);if(!t)return;const entry=t.guests[si];if(!entry)return;setTables(p=>p.map(t=>t.id!==tableId?t:{...t,guests:t.guests.map(g=>g&&g.id===entry.id?null:g)}));setUnassigned(p=>[...p,entry]);};
+  const handleUpload=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>setUnassigned(p=>[...p,...parseGuestText(ev.target.result)]);r.readAsText(f);e.target.value='';};
+
+  /* ── Stats ────────────────────────────────────────────────────────────── */
+  const totalFilled=tables.reduce((s,t)=>s+t.guests.filter(Boolean).length,0);
+  const totalSeats=tables.reduce((s,t)=>s+t.capacity,0);
+  const totalUP=unassigned.reduce((s,g)=>s+g.count,0);
+  const overTableId=overSeat&&overSeat.tableId;
+  const dragFromOut=drag&&drag.type==='guest'&&(drag.source==='unassigned'||drag.source.tableId!==overTableId);
+  const getBlockInfo=id=>{if(!drag||drag.type!=='guest'||overTableId!==id||!dragFromOut)return null;const t=tables.find(t=>t.id===id);if(!t)return null;const av=t.guests.filter(g=>!g).length;if(av>=drag.entry.count)return null;return{msg:av===0?'TABLE FULL':`NEED ${drag.entry.count} SEATS`};};
+  const orderedTables=tableOrder.map(id=>tables.find(t=>t.id===id)).filter(Boolean);
+
+  const btnStyle={padding:'9px 18px',borderRadius:6,border:'none',fontWeight:700,cursor:'pointer',fontSize:11,letterSpacing:'.12em',textTransform:'uppercase',fontFamily:'Georgia,serif'};
+
+  return(
+    <div style={{minHeight:'100vh',background:P.cream,fontFamily:'Georgia,serif',color:P.brown,display:'flex',flexDirection:'column',position:'relative'}}>
+      <DragOverlay drag={view==='tables'?drag:null}/>
+      {showWizard&&<div style={{position:'fixed',inset:0,zIndex:500}}><SetupWizard onAddTables={addTables} onSkip={()=>setShowWizard(false)}/></div>}
+      {showModal&&<AddTableModal onAdd={addTables} onClose={()=>setShowModal(false)}/>}
+
+      {/* Header */}
+      <header style={{background:'linear-gradient(135deg,#3d4a38 0%,#4e5e48 100%)',padding:'12px 24px',display:'flex',alignItems:'center',justifyContent:'space-between',boxShadow:'0 4px 20px rgba(0,0,0,.25)',flexShrink:0,gap:12}}>
+        {/* Left: back + name */}
+        <div style={{display:'flex',alignItems:'center',gap:12,minWidth:0}}>
+          <button onClick={onBack} title="Back to dashboard" style={{background:'rgba(255,255,255,.12)',border:'none',color:'#f4efe6',cursor:'pointer',borderRadius:6,padding:'6px 10px',fontSize:13,flexShrink:0}}>←</button>
+          <div style={{fontSize:16,color:'#f4efe6',letterSpacing:'.18em',textTransform:'uppercase',fontWeight:700,flexShrink:0}}>EasySeat</div>
+          {editingChartName
+            ?<input autoFocus value={chartName} onChange={e=>setChartName(e.target.value)}
+                onBlur={()=>setEditingChartName(false)}
+                onKeyDown={e=>{if(e.key==='Enter'||e.key==='Escape')setEditingChartName(false);}}
+                style={{fontSize:13,color:'#f4efe6',background:'rgba(255,255,255,.15)',border:'none',borderBottom:'1.5px solid rgba(255,255,255,.4)',outline:'none',padding:'2px 6px',borderRadius:4,letterSpacing:'.05em',minWidth:120,maxWidth:240}}/>
+            :<span onClick={()=>setEditingChartName(true)} title="Click to rename" style={{fontSize:13,color:'rgba(244,239,230,.8)',letterSpacing:'.05em',cursor:'text',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                {chartName}
+              </span>
+          }
+          <div style={{fontSize:10,color:'#a8bc9e',letterSpacing:'.12em',textTransform:'uppercase',flexShrink:0}}>{totalFilled}/{totalSeats} seats</div>
+        </div>
+
+        {/* Center: toggle */}
+        <div style={{display:'flex',alignItems:'center',background:'rgba(0,0,0,.25)',borderRadius:10,padding:3,gap:2,flexShrink:0}}>
+          {['tables','floorplan'].map(v=>(
+            <button key={v} onClick={()=>setView(v)} style={{padding:'7px 18px',borderRadius:8,border:'none',cursor:'pointer',background:view===v?'#f4efe6':'transparent',color:view===v?P.brown:'rgba(244,239,230,.65)',fontFamily:'Georgia,serif',fontSize:11,fontWeight:view===v?700:400,letterSpacing:'.12em',textTransform:'uppercase',transition:'all .18s',boxShadow:view===v?'0 2px 8px rgba(0,0,0,.18)':'none'}}>
+              {v==='tables'?'⊞ Tables':'⌖ Floorplan'}
+            </button>
+          ))}
+        </div>
+
+        {/* Right: user + save + export + add tables */}
+        <div style={{display:'flex',alignItems:'center',gap:8,flexShrink:0}}>
+          {/* User pill */}
+          <div style={{display:'flex',alignItems:'center',gap:7,background:'rgba(255,255,255,.1)',borderRadius:20,padding:'5px 12px 5px 7px',cursor:'pointer'}}
+            onClick={async()=>{await supabase.auth.signOut();}}
+            title="Sign out">
+            <div style={{width:24,height:24,borderRadius:'50%',background:'#7a8c72',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700,color:'#f4efe6',flexShrink:0}}>
+              {(session.user.user_metadata?.full_name||session.user.email||'?')[0].toUpperCase()}
+            </div>
+            <span style={{fontSize:11,color:'rgba(244,239,230,.85)',maxWidth:120,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+              {session.user.user_metadata?.full_name||session.user.email}
+            </span>
+          </div>
+          {saveMsg&&<span style={{fontSize:11,color:saveMsg==='Saved!'?'#a8e6a0':'#ffb3b3',letterSpacing:'.08em'}}>{saveMsg}</span>}
+          <button onClick={saveChart} disabled={saving} style={{...btnStyle,background:'#4a8c5a',color:'#f4efe6',opacity:saving?.7:1}}>
+            {saving?'Saving…':'💾 Save'}
+          </button>
+          <button onClick={()=>setShowModal(true)} style={{...btnStyle,background:'#6b7c62',color:'#f4efe6'}}>+ Add Tables</button>
+          <button onClick={exportPDF} style={{...btnStyle,background:'rgba(255,255,255,.15)',color:'#f4efe6',border:'1px solid rgba(255,255,255,.25)'}}>↓ Export PDF</button>
+        </div>
+      </header>
+
+      <div style={{display:'flex',flex:1,overflow:'hidden'}}>
+        {/* Sidebar */}
+        {view==='tables'&&(
+          <aside style={{width:258,minWidth:258,background:P.parchment,borderRight:`1px solid ${P.border}`,display:'flex',flexDirection:'column',flexShrink:0}}>
+            <div style={{padding:'14px 12px 10px',borderBottom:`1px solid ${P.border}`}}>
+              <div style={{fontSize:10,letterSpacing:'.14em',color:P.brownMid,fontWeight:700,textTransform:'uppercase',marginBottom:8}}>Guest List</div>
+              <div style={{display:'flex',gap:5,marginBottom:4}}>
+                <input value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addGuest()} placeholder="Name or Family…" style={{flex:1,padding:'6px 8px',borderRadius:6,border:'1px solid #bfbab0',fontSize:12,background:P.cream,color:P.brown,outline:'none'}}/>
+                <input type="number" min="1" max="20" value={newCount} onChange={e=>setNewCount(Math.max(1,Math.min(20,+e.target.value)))} style={{width:42,padding:'6px 4px',borderRadius:6,border:'1px solid #bfbab0',fontSize:12,textAlign:'center',background:newCount>1?'#d8ead4':P.cream,color:P.brown,fontWeight:newCount>1?700:400,outline:'none'}}/>
+                <button onClick={addGuest} style={{padding:'6px 10px',borderRadius:4,background:'#6b7c62',border:'none',cursor:'pointer',fontSize:15,fontWeight:700,color:'#f4efe6'}}>+</button>
+              </div>
+              <div style={{fontSize:10,color:P.brownLight,textAlign:'right',marginBottom:10}}>← party size (1–20)</div>
+              <input ref={fileRef} type="file" accept=".txt,.csv" onChange={handleUpload} style={{display:'none'}}/>
+              <button onClick={()=>fileRef.current.click()} style={{width:'100%',padding:'8px 10px',borderRadius:6,background:'transparent',border:`1.5px dashed ${P.gold}`,color:P.brownMid,cursor:'pointer',fontSize:11,letterSpacing:'.1em',textTransform:'uppercase',fontFamily:'Georgia,serif',transition:'background .15s'}}>↑ Upload Guest List</button>
+              <div style={{fontSize:9.5,color:P.brownLight,marginTop:5,lineHeight:1.5}}>.txt or .csv · one name per line<br/>Groups: "Smith Family (5)"</div>
+            </div>
+            <div data-drop-zone="unassigned" style={{flex:1,overflowY:'auto',padding:'8px 10px',background:overList?'#d8ead4':'transparent',transition:'background .15s'}}>
+              {overList&&drag&&drag.type==='guest'&&<div style={{textAlign:'center',padding:'8px 6px',marginBottom:6,border:'2px dashed #6b7c62',borderRadius:8,color:'#6b7c62',fontSize:11,fontStyle:'italic'}}>Drop to unassign</div>}
+              {unassigned.length===0&&!overList&&<div style={{textAlign:'center',color:P.brownLight,fontSize:12,padding:'24px 10px',fontStyle:'italic'}}>Add guests here</div>}
+              {unassigned.map(entry=>(
+                <div key={entry.id} onMouseDown={e=>startGuestDrag(e,entry,'unassigned')}
+                  style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 9px',marginBottom:4,borderRadius:7,background:drag&&drag.type==='guest'&&drag.entry.id===entry.id?'#c8dbc4':entry.count>1?'#d4e8d0':P.cream,border:`1px solid ${drag&&drag.type==='guest'&&drag.entry.id===entry.id?'#6b7c62':entry.count>1?'#8faa88':P.border}`,cursor:editingGuestId===entry.id?'default':'grab',userSelect:'none',opacity:drag&&drag.type==='guest'&&drag.entry.id===entry.id?.45:1}}>
+                  <span style={{display:'flex',alignItems:'center',gap:5,minWidth:0,flex:1}}>
+                    <span>{entry.count>1?'👨‍👩‍👧':'🪑'}</span>
+                    {editingGuestId===entry.id
+                      ?<input autoFocus value={editGuestVal} onChange={e=>setEditGuestVal(e.target.value)} onMouseDown={e=>e.stopPropagation()} onBlur={submitEditGuest} onKeyDown={e=>{if(e.key==='Enter')submitEditGuest();if(e.key==='Escape'){setEditingGuestId(null);setEditGuestVal('');}}} style={{flex:1,fontSize:12,background:'transparent',border:'none',borderBottom:`1.5px solid ${P.gold}`,outline:'none',fontFamily:'Georgia,serif',color:P.brown,minWidth:0}}/>
+                      :<span onDoubleClick={e=>{e.stopPropagation();startEditGuest(entry.id,entry.name);}} title="Double-click to edit name" style={{color:entry.count>1?'#2d4a28':P.brown,fontWeight:entry.count>1?600:400,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',fontSize:12.5,cursor:'grab',flex:1}}>{entry.name}</span>
+                    }
+                    {entry.count>1&&editingGuestId!==entry.id&&<span style={{background:'#4a5e45',color:'#f4efe6',borderRadius:10,padding:'1px 7px',fontSize:10,fontWeight:700,flexShrink:0}}>×{entry.count}</span>}
+                  </span>
+                  <button onClick={()=>removeGuest(entry.id)} style={{background:'none',border:'none',cursor:'pointer',color:'#b07060',fontSize:15,padding:'0 0 0 6px',lineHeight:1,flexShrink:0}}>×</button>
+                </div>
+              ))}
+            </div>
+            <div style={{padding:'10px 12px',borderTop:`1px solid ${P.border}`,fontSize:10.5,color:P.brownLight,lineHeight:1.85}}>
+              <div>🖱 <b>Drag</b> guests to seats</div>
+              <div>✎ <b>Double-click name</b> to edit</div>
+              <div>↩️ <b>Drag</b> seat → sidebar to unassign</div>
+              <div>✦ <b>Double-click</b> seat to unassign</div>
+              <div>⠿ <b>Drag handle</b> to reorder tables</div>
+              <div style={{marginTop:4,color:'#4a5e45',fontWeight:600}}>👨‍👩‍👧 Dark green = family group</div>
+            </div>
+          </aside>
+        )}
+
+        <main style={{flex:1,overflow:'auto',padding:'24px 28px',position:'relative',display:view==='tables'?'block':'none'}}>
+          {orderedTables.length===0?(
+            <div className="empty-state" style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:16}}>
+              <div style={{fontSize:40,animation:'shimmer 2.5s ease infinite'}}>🪑</div>
+              <div style={{fontSize:16,color:P.brownLight,fontStyle:'italic'}}>No tables yet</div>
+              <button onClick={()=>setShowModal(true)} style={{padding:'13px 36px',borderRadius:10,border:'none',background:'#3d4a38',color:'#f4efe6',cursor:'pointer',fontSize:12,letterSpacing:'.15em',textTransform:'uppercase',fontFamily:'Georgia,serif',fontWeight:700,boxShadow:'0 4px 16px rgba(61,74,56,.3)'}}>+ Add Tables</button>
+            </div>
+          ):(
+            <div style={{display:'flex',flexWrap:'wrap',gap:26,alignItems:'flex-start'}}>
+              {orderedTables.map(table=>{
+                const info=getBlockInfo(table.id);
+                return(<TableCard key={table.id} table={table} overSeat={overSeat} drag={drag} isDropTarget={dropTarget===table.id} onSeatMouseDown={startGuestDrag} onUnassign={unassignFromSeat} onRemove={removeTable} onHandleMouseDown={startTableDrag} onRename={renameTable} isBlockedAndOver={!!info} blockedMsg={info&&info.msg}/>);
+              })}
+            </div>
+          )}
+        </main>
+
+        <div style={{display:view==='floorplan'?'flex':'none',flex:1,overflow:'hidden'}}>
+          <FloorplanView tables={orderedTables} fpDataRef={fpDataRef} floorplanBg={floorplanBg} onSetBg={setFloorplanBg}
+            initialPositions={fpDataRef.current.positions} initialRotations={fpDataRef.current.rotations}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LANDING PAGE
+══════════════════════════════════════════════════════════════════════════ */
+function LandingPage({onGetStarted}){
+  return(
+    <div style={{minHeight:'100vh',background:'radial-gradient(ellipse at 50% 40%, #edf4ea 0%, #f4efe6 65%)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:24}}>
+      <div style={{position:'absolute',width:500,height:500,borderRadius:'50%',border:'1px solid rgba(122,140,114,.12)',pointerEvents:'none'}}/>
+      <div style={{position:'absolute',width:380,height:380,borderRadius:'50%',border:'1px solid rgba(122,140,114,.1)',pointerEvents:'none'}}/>
+      <div className="wizard-card" style={{textAlign:'center',maxWidth:480,zIndex:1}}>
+        <svg width="80" height="60" viewBox="0 0 80 60" style={{marginBottom:16}}>
+          <circle cx="40" cy="30" r="10" fill="none" stroke="#7a8c72" strokeWidth="1.5"/>
+          {[0,60,120,180,240,300].map(a=>{const r=a*Math.PI/180,x1=40+12*Math.cos(r),y1=30+12*Math.sin(r),x2=40+24*Math.cos(r),y2=30+24*Math.sin(r);return<g key={a}><line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#7a8c72" strokeWidth="1"/><circle cx={x2} cy={y2} r="3.5" fill="#a8bc9e"/></g>;})}
+          <circle cx="40" cy="30" r="5" fill="#7a8c72"/>
+        </svg>
+        <div style={{fontSize:30,letterSpacing:'.14em',textTransform:'uppercase',color:P.brown,marginBottom:6}}>EasySeat</div>
+        <div style={{width:60,height:1.5,background:P.gold,margin:'0 auto 28px'}}/>
+        <div style={{fontSize:14,color:P.brownMid,lineHeight:1.8,marginBottom:32}}>
+          The easiest way to build your seating chart.<br/>
+          Drag &amp; drop guests, design your floorplan,<br/>and export with one click.
+        </div>
+        <button onClick={onGetStarted} style={{padding:'14px 40px',borderRadius:10,border:'none',background:'#3d4a38',color:'#f4efe6',cursor:'pointer',fontSize:12,letterSpacing:'.15em',textTransform:'uppercase',fontFamily:'Georgia,serif',fontWeight:700,boxShadow:'0 4px 16px rgba(61,74,56,.3)'}}>
+          Get Started →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ROOT — landing → auth → dashboard → app
+══════════════════════════════════════════════════════════════════════════ */
+const FROM_OAUTH=localStorage.getItem('es_oauth_pending')==='1';
+
+function Root(){
+  const[session,setSession]=useState(undefined);
+  const[screen,setScreen]=useState('dashboard');
+  const[hasVisited,setHasVisited]=useState(
+    ()=>FROM_OAUTH||localStorage.getItem('es_visited')==='1'
+  );
+  const[authPending,setAuthPending]=useState(FROM_OAUTH);
+  const[openChartId,setOpenChartId]=useState(null);
+  const[openChartName,setOpenChartName]=useState('');
+  const[openChartData,setOpenChartData]=useState(null);
+  const[loadingChart,setLoadingChart]=useState(false);
+
+  useEffect(()=>{
+    supabase.auth.getSession().then(({data:{session}})=>{
+      // If we have a session already, no need to wait for onAuthStateChange
+      if(session){
+        localStorage.removeItem('es_oauth_pending');
+        localStorage.setItem('es_visited','1');
+        setSession(session);
+        setAuthPending(false);
+        setHasVisited(true);
+      } else if(!FROM_OAUTH){
+        // Normal visit, no OAuth in progress — resolve immediately
+        setSession(null);
+        setAuthPending(false);
+      } else {
+        // OAuth pending but no session yet — give it 5 seconds then give up
+        setTimeout(()=>{
+          localStorage.removeItem('es_oauth_pending');
+          setAuthPending(false);
+          setSession(null);
+        }, 5000);
+      }
+    });
+    const{data:{subscription}}=supabase.auth.onAuthStateChange((event,session)=>{
+      if(session){
+        localStorage.removeItem('es_oauth_pending');
+        localStorage.setItem('es_visited','1');
+        setSession(session);
+        setAuthPending(false);
+        setHasVisited(true);
+      } else if(event==='SIGNED_OUT'){
+        setSession(null);
+        setAuthPending(false);
+      } else if(!FROM_OAUTH){
+        setSession(null);
+        setAuthPending(false);
+      }
+    });
+    return()=>subscription.unsubscribe();
+  },[]);
+
+  const handleGetStarted=()=>{
+    localStorage.setItem('es_visited','1');
+    setHasVisited(true);
+  };
+
+  const handleOpenChart=async(id,name)=>{
+    setLoadingChart(true);
+    const{data,error}=await supabase.from('charts').select('data').eq('id',id).single();
+    if(!error&&data){
+      const d=data.data||{};
+      if(d.tables?.length){const maxId=Math.max(...d.tables.map(t=>t.id||0));if(maxId>=_tid)_tid=maxId+1;}
+      if(d.unassigned?.length){const maxGid=Math.max(...d.unassigned.map(g=>+(g.id?.replace('g','')||0)));if(maxGid>=_gid)_gid=maxGid+1;}
+      setOpenChartData(d);
+    }
+    setOpenChartId(id);setOpenChartName(name);setScreen('app');setLoadingChart(false);
+  };
+  const handleNewChart=()=>{setOpenChartId(null);setOpenChartName('Untitled Chart');setOpenChartData(null);setScreen('app');};
+  const handleBack=()=>{setScreen('dashboard');setOpenChartId(null);setOpenChartData(null);};
+
+  const spinner=(
+    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'#f4efe6'}}>
+      <div style={{width:36,height:36,borderRadius:'50%',border:'3px solid #d4cfc4',borderTopColor:'#7a8c72',animation:'spin 0.8s linear infinite'}}/>
+    </div>
+  );
+
+  if(session===undefined||authPending) return spinner;
+
+  if(session){
+    if(loadingChart) return(
+      <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'#f4efe6'}}>
+        <div style={{textAlign:'center'}}>
+          <div style={{width:36,height:36,borderRadius:'50%',border:'3px solid #d4cfc4',borderTopColor:'#7a8c72',animation:'spin 0.8s linear infinite',margin:'0 auto 16px'}}/>
+          <div style={{color:'#8fa086',fontSize:13,fontStyle:'italic'}}>Loading chart…</div>
+        </div>
+      </div>
+    );
+    if(screen==='app') return <App session={session} chartId={openChartId} chartName={openChartName} initialData={openChartData} onBack={handleBack}/>;
+    return <Dashboard session={session} onOpenChart={handleOpenChart} onNewChart={handleNewChart}/>;
+  }
+
+  if(!hasVisited) return <LandingPage onGetStarted={handleGetStarted}/>;
+  return <LoginScreen/>;
+}
+
 
 ReactDOM.createRoot(document.getElementById('root')).render(<Root/>);
 </script>
